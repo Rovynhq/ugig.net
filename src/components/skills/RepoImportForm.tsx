@@ -96,17 +96,8 @@ export function RepoImportForm() {
     setSkills((prev) => prev.map((s) => ({ ...s, selected: !allSelected })));
   }
 
-  function applyGlobalPrice() {
-    const price = parseInt(globalPrice) || 0;
-    setSkills((prev) => prev.map((s) => ({ ...s, price_sats: price })));
-  }
 
-  function setSkillPrice(dirName: string, value: string) {
-    const price = Math.max(0, parseInt(value) || 0);
-    setSkills((prev) =>
-      prev.map((s) => (s.dirName === dirName ? { ...s, price_sats: price } : s))
-    );
-  }
+
 
   async function handleImport() {
     const selected = skills.filter((s) => s.selected);
@@ -115,9 +106,10 @@ export function RepoImportForm() {
     setStep("importing");
     setError(null);
 
+    const price = Math.max(0, parseInt(globalPrice) || 0);
     const payload = selected.map((s) => ({
       ...s,
-      price_sats: s.price_sats,
+      price_sats: price,
       category: globalCategory || undefined,
     }));
 
@@ -216,7 +208,7 @@ export function RepoImportForm() {
               {skills.length} skill{skills.length !== 1 ? "s" : ""} found
             </h2>
             <p className="text-sm text-muted-foreground">
-              Select which skills to import. Set a price per skill or bulk-apply below.
+              Select which skills to import. Set a price and category to apply to all of them.
             </p>
             {truncated && (
               <p className="text-xs text-amber-500 mt-1">
@@ -232,24 +224,22 @@ export function RepoImportForm() {
         {/* Global settings */}
         <div className="p-4 border border-border rounded-lg bg-muted/30 space-y-3">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Apply to all selected skills
+            Applied to all imported skills
           </p>
           <div className="flex flex-wrap gap-3 items-end">
             <div className="space-y-1">
-              <Label className="text-xs">Price (sats)</Label>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min="0"
-                  value={globalPrice}
-                  onChange={(e) => setGlobalPrice(e.target.value)}
-                  className="w-28 h-8 text-sm"
-                  placeholder="0 = free"
-                />
-                <Button type="button" variant="outline" size="sm" onClick={applyGlobalPrice}>
-                  Apply
-                </Button>
-              </div>
+              <Label className="text-xs flex items-center gap-1">
+                <Zap className="h-3 w-3 text-amber-500" />
+                Price (sats)
+              </Label>
+              <Input
+                type="number"
+                min="0"
+                value={globalPrice}
+                onChange={(e) => setGlobalPrice(e.target.value)}
+                className="w-36 h-8 text-sm"
+                placeholder="0 = free"
+              />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Category</Label>
@@ -319,7 +309,7 @@ export function RepoImportForm() {
                     {skill.tagline}
                   </p>
                 )}
-                <div className="flex items-center gap-3 mt-2 flex-wrap">
+                <div className="flex items-center gap-3 mt-1">
                   <a
                     href={skill.sourceUrl}
                     target="_blank"
@@ -330,21 +320,10 @@ export function RepoImportForm() {
                     <ExternalLink className="h-2.5 w-2.5" />
                     {skill.dirName}
                   </a>
-                  <div
-                    className="flex items-center gap-1"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Zap className="h-3 w-3 text-amber-500 shrink-0" />
-                    <input
-                      type="number"
-                      min="0"
-                      value={skill.price_sats}
-                      onChange={(e) => setSkillPrice(skill.dirName, e.target.value)}
-                      className="w-24 h-6 px-1.5 text-xs border border-border rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/30"
-                      placeholder="0"
-                    />
-                    <span className="text-xs text-muted-foreground">sats</span>
-                  </div>
+                  <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Zap className="h-3 w-3 text-amber-500" />
+                    {skill.price_sats === 0 ? "Free" : `${skill.price_sats.toLocaleString()} sats`}
+                  </span>
                 </div>
               </div>
             </div>
