@@ -8,6 +8,10 @@
 const GITHUB_API_BASE = "https://api.github.com";
 const GITHUB_RAW_BASE = "https://raw.githubusercontent.com";
 const FETCH_TIMEOUT_MS = 15_000;
+const GITHUB_HEADERS = {
+  Accept: "application/vnd.github.v3+json",
+  "User-Agent": "ugig.net/SkillImporter",
+};
 
 export interface RepoSkillPreview {
   dirName: string;
@@ -54,6 +58,7 @@ export function parseGitHubUrl(url: string): ParsedGitHubUrl | null {
 interface GitHubTreeNode {
   path: string;
   type: "blob" | "tree";
+  sha: string;
   size?: number;
 }
 
@@ -62,18 +67,10 @@ interface GitHubTreeResponse {
   truncated: boolean;
 }
 
-async function fetchGitHubTree(
-  owner: string,
-  repo: string,
-  branch: string
-): Promise<GitHubTreeResponse> {
-  const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`;
+async function githubGet<T>(url: string): Promise<T> {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    headers: {
-      Accept: "application/vnd.github.v3+json",
-      "User-Agent": "ugig.net/SkillImporter",
-    },
+    headers: GITHUB_HEADERS,
   });
 
   if (!res.ok) {
@@ -85,8 +82,46 @@ async function fetchGitHubTree(
   return res.json();
 }
 
-async function fetchRawFile(rawUrl: string): Promise<string | null> {
+async function fetchGitHubTree(
+  owner: string,
+  repo: string,
+  branch: string
+): Promise<GitHubTreeResponse> {
+  return githubGet(
+    `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`
+  );
+}
+
+/**
+ * Fetch blob content via the GitHub Blobs API (base64-decoded).
+ * Falls back to raw.githubusercontent.com if the blob API fails.
+ */
+async function fetchBlobContent(
+  owner: string,
+  repo: string,
+  branch: string,
+  sha: string,
+  filePath: string
+): Promise<string | null> {
+  // Primary: GitHub Blobs API (same host as tree call, consistent auth)
   try {
+    const blob = await githubGet<{ content: string; encoding: string }>(
+      `${GITHUB_API_BASE}/repos/${owner}/${repo}/git/blobs/${sha}`
+    );
+    if (blob.encoding === "base64") {
+      const text = Buffer.from(blob.content.replace(/\n/g, ""), "base64").toString("utf8");
+      return text.length > 100_000 ? text.slice(0, 100_000) : text;
+    }
+    if (blob.encoding === "utf-8") {
+      return blob.content.length > 100_000 ? blob.content.slice(0, 100_000) : blob.content;
+    }
+  } catch {
+    // fall through to raw fallback
+  }
+
+  // Fallback: raw.githubusercontent.com
+  try {
+    const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${filePath}`;
     const res = await fetch(rawUrl, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: { "User-Agent": "ugig.net/SkillImporter" },
@@ -218,8 +253,8 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
 
   // Find direct subdirectory children of basePath
   const directChildDirs = new Set<string>();
-  // Store full paths (preserving original casing) keyed by parent dir
-  const filesByDir = new Map<string, string[]>();
+  // Store { path, sha } for blobs, keyed by parent dir path
+  const filesByDir = new Map<string, Array<{ path: string; sha: string }>>();
 
   for (const node of treeData.tree) {
     const nodePath = node.path;
@@ -234,7 +269,7 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
     } else if (node.type === "blob") {
       const parentDir = nodePath.substring(0, nodePath.lastIndexOf("/"));
       if (!filesByDir.has(parentDir)) filesByDir.set(parentDir, []);
-      filesByDir.get(parentDir)!.push(nodePath);
+      filesByDir.get(parentDir)!.push({ path: nodePath, sha: node.sha });
     }
   }
 
@@ -248,23 +283,23 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
 
   const skillPromises = dirs.map(async (dirPath): Promise<RepoSkillPreview | null> => {
     const dirName = dirPath.split("/").pop() || dirPath;
-    const fullPaths = filesByDir.get(dirPath) || [];
+    const blobs = filesByDir.get(dirPath) || [];
 
-    if (fullPaths.length === 0) return null;
+    if (blobs.length === 0) return null;
 
-    // Case-insensitive priority match, preserving original path for correct URL
-    const skillFilePath =
-      fullPaths.find((p) => p.split("/").pop()!.toUpperCase() === "SKILL.MD") ||
-      fullPaths.find((p) => p.split("/").pop()!.toLowerCase() === "readme.md") ||
-      fullPaths.find((p) => p.split("/").pop()!.toLowerCase().endsWith(".md"));
+    // Case-insensitive priority match, preserving original path + sha
+    const skillBlob =
+      blobs.find((b) => b.path.split("/").pop()!.toUpperCase() === "SKILL.MD") ||
+      blobs.find((b) => b.path.split("/").pop()!.toLowerCase() === "readme.md") ||
+      blobs.find((b) => b.path.split("/").pop()!.toLowerCase().endsWith(".md"));
 
-    if (!skillFilePath) return null;
+    if (!skillBlob) return null;
 
-    const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${skillFilePath}`;
-    const content = await fetchRawFile(rawUrl);
+    const content = await fetchBlobContent(owner, repo, branch, skillBlob.sha, skillBlob.path);
     if (!content) return null;
 
     const meta = parseSkillContent(content, dirName);
+    const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${skillBlob.path}`;
 
     return {
       dirName,

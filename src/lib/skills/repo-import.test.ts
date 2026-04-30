@@ -47,13 +47,13 @@ describe("parseGitHubUrl", () => {
 const TREE_RESPONSE = {
   truncated: false,
   tree: [
-    { path: "skills/my-skill", type: "tree" },
-    { path: "skills/my-skill/SKILL.md", type: "blob", size: 200 },
-    { path: "skills/other-skill", type: "tree" },
-    { path: "skills/other-skill/README.md", type: "blob", size: 150 },
-    { path: "skills/empty-skill", type: "tree" },
+    { path: "skills/my-skill", type: "tree", sha: "dir-sha-1" },
+    { path: "skills/my-skill/SKILL.md", type: "blob", sha: "blob-sha-1", size: 200 },
+    { path: "skills/other-skill", type: "tree", sha: "dir-sha-2" },
+    { path: "skills/other-skill/README.md", type: "blob", sha: "blob-sha-2", size: 150 },
+    { path: "skills/empty-skill", type: "tree", sha: "dir-sha-3" },
     // no files in empty-skill — should be skipped
-    { path: "unrelated-file.md", type: "blob", size: 50 },
+    { path: "unrelated-file.md", type: "blob", sha: "blob-sha-x", size: 50 },
   ],
 };
 
@@ -82,26 +82,40 @@ describe("discoverSkillsInRepo", () => {
     vi.unstubAllGlobals();
   });
 
-  function mockFetch(urlPatterns: Record<string, unknown>) {
+  // The implementation now uses the GitHub Blobs API (json with base64 content)
+  // for fetching file content, with raw.githubusercontent.com as fallback.
+  // mockFetch matches by URL substring: "git/trees" for the tree, "git/blobs" for content.
+  function mockFetch(treeResponse: unknown, blobContents: Record<string, string>) {
     (global.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
-      for (const [pattern, body] of Object.entries(urlPatterns)) {
-        if (url.includes(pattern)) {
+      if (url.includes("git/trees")) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(treeResponse),
+        });
+      }
+      if (url.includes("git/blobs/")) {
+        // Extract sha from URL: .../git/blobs/{sha}
+        const sha = url.split("git/blobs/")[1];
+        const content = blobContents[sha];
+        if (content !== undefined) {
           return Promise.resolve({
             ok: true,
-            json: () => Promise.resolve(body),
-            text: () => Promise.resolve(typeof body === "string" ? body : JSON.stringify(body)),
+            json: () => Promise.resolve({
+              content: Buffer.from(content).toString("base64"),
+              encoding: "base64",
+            }),
           });
         }
+        return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
       }
       return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
     });
   }
 
   it("discovers skills from a GitHub repo URL", async () => {
-    mockFetch({
-      "git/trees": TREE_RESPONSE,
-      "my-skill/SKILL.md": SKILL_MD_CONTENT,
-      "other-skill/README.md": README_CONTENT,
+    mockFetch(TREE_RESPONSE, {
+      "blob-sha-1": SKILL_MD_CONTENT,
+      "blob-sha-2": README_CONTENT,
     });
 
     const { skills, repoInfo } = await discoverSkillsInRepo(
@@ -124,10 +138,9 @@ describe("discoverSkillsInRepo", () => {
   });
 
   it("skips directories with no markdown files", async () => {
-    mockFetch({
-      "git/trees": TREE_RESPONSE,
-      "my-skill/SKILL.md": SKILL_MD_CONTENT,
-      "other-skill/README.md": README_CONTENT,
+    mockFetch(TREE_RESPONSE, {
+      "blob-sha-1": SKILL_MD_CONTENT,
+      "blob-sha-2": README_CONTENT,
     });
 
     const { skills } = await discoverSkillsInRepo(
@@ -141,16 +154,15 @@ describe("discoverSkillsInRepo", () => {
     const treeWithBoth = {
       truncated: false,
       tree: [
-        { path: "skills/dual", type: "tree" },
-        { path: "skills/dual/SKILL.md", type: "blob" },
-        { path: "skills/dual/README.md", type: "blob" },
+        { path: "skills/dual", type: "tree", sha: "dir-dual" },
+        { path: "skills/dual/SKILL.md", type: "blob", sha: "sha-skill" },
+        { path: "skills/dual/README.md", type: "blob", sha: "sha-readme" },
       ],
     };
 
-    mockFetch({
-      "git/trees": treeWithBoth,
-      "dual/SKILL.md": "---\nname: From Skill MD\n---\n\nContent",
-      "dual/README.md": "# From Readme\n\nShould not be used",
+    mockFetch(treeWithBoth, {
+      "sha-skill": "---\nname: From Skill MD\n---\n\nContent",
+      "sha-readme": "# From Readme\n\nShould not be used",
     });
 
     const { skills } = await discoverSkillsInRepo(
@@ -179,9 +191,7 @@ describe("discoverSkillsInRepo", () => {
   });
 
   it("throws when no skill directories are found", async () => {
-    mockFetch({
-      "git/trees": { truncated: false, tree: [] },
-    });
+    mockFetch({ truncated: false, tree: [] }, {});
 
     await expect(
       discoverSkillsInRepo("https://github.com/owner/repo/tree/main/skills")
@@ -192,14 +202,13 @@ describe("discoverSkillsInRepo", () => {
     const treeNoMeta = {
       truncated: false,
       tree: [
-        { path: "skills/my-cool-skill", type: "tree" },
-        { path: "skills/my-cool-skill/SKILL.md", type: "blob" },
+        { path: "skills/my-cool-skill", type: "tree", sha: "dir-sha" },
+        { path: "skills/my-cool-skill/SKILL.md", type: "blob", sha: "blob-sha-plain" },
       ],
     };
 
-    mockFetch({
-      "git/trees": treeNoMeta,
-      "my-cool-skill/SKILL.md": "Just some plain text with no heading or frontmatter.",
+    mockFetch(treeNoMeta, {
+      "blob-sha-plain": "Just some plain text with no heading or frontmatter.",
     });
 
     const { skills } = await discoverSkillsInRepo(
@@ -210,13 +219,13 @@ describe("discoverSkillsInRepo", () => {
   });
 
   it("reports truncated flag from GitHub", async () => {
-    mockFetch({
-      "git/trees": { truncated: true, tree: [
-        { path: "skills/a", type: "tree" },
-        { path: "skills/a/SKILL.md", type: "blob" },
+    mockFetch(
+      { truncated: true, tree: [
+        { path: "skills/a", type: "tree", sha: "dir-a" },
+        { path: "skills/a/SKILL.md", type: "blob", sha: "blob-a" },
       ]},
-      "a/SKILL.md": "# Skill A\n\nDescription.",
-    });
+      { "blob-a": "# Skill A\n\nDescription." }
+    );
 
     const { truncated } = await discoverSkillsInRepo(
       "https://github.com/owner/repo/tree/main/skills"
