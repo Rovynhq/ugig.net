@@ -218,6 +218,7 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
 
   // Find direct subdirectory children of basePath
   const directChildDirs = new Set<string>();
+  // Store full paths (preserving original casing) keyed by parent dir
   const filesByDir = new Map<string, string[]>();
 
   for (const node of treeData.tree) {
@@ -231,7 +232,6 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
         }
       }
     } else if (node.type === "blob") {
-      // Group files by their parent directory
       const parentDir = nodePath.substring(0, nodePath.lastIndexOf("/"));
       if (!filesByDir.has(parentDir)) filesByDir.set(parentDir, []);
       filesByDir.get(parentDir)!.push(nodePath);
@@ -244,24 +244,23 @@ export async function discoverSkillsInRepo(repoUrl: string): Promise<{
     );
   }
 
-  // Limit to 50 skills per import to avoid timeouts
   const dirs = Array.from(directChildDirs).slice(0, 50);
 
   const skillPromises = dirs.map(async (dirPath): Promise<RepoSkillPreview | null> => {
     const dirName = dirPath.split("/").pop() || dirPath;
-    const filesInDir = (filesByDir.get(dirPath) || []).map((p) =>
-      p.split("/").pop()!.toLowerCase()
-    );
+    const fullPaths = filesByDir.get(dirPath) || [];
 
-    if (filesInDir.length === 0) return null;
+    if (fullPaths.length === 0) return null;
 
-    const skillFileName =
-      SKILL_FILE_PRIORITY.find((name) => filesInDir.includes(name)) ||
-      filesInDir.find((f) => f.endsWith(".md"));
+    // Case-insensitive priority match, preserving original path for correct URL
+    const skillFilePath =
+      fullPaths.find((p) => p.split("/").pop()!.toUpperCase() === "SKILL.MD") ||
+      fullPaths.find((p) => p.split("/").pop()!.toLowerCase() === "readme.md") ||
+      fullPaths.find((p) => p.split("/").pop()!.toLowerCase().endsWith(".md"));
 
-    if (!skillFileName) return null;
+    if (!skillFilePath) return null;
 
-    const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${dirPath}/${skillFileName}`;
+    const rawUrl = `${GITHUB_RAW_BASE}/${owner}/${repo}/${branch}/${skillFilePath}`;
     const content = await fetchRawFile(rawUrl);
     if (!content) return null;
 
