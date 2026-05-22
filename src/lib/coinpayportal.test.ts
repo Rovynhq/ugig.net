@@ -1,6 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import crypto from "crypto";
-import { verifyWebhookSignature, SUPPORTED_CURRENCIES } from "./coinpayportal";
+import {
+  createInvoice,
+  sendInvoice,
+  verifyWebhookSignature,
+  SUPPORTED_CURRENCIES,
+} from "./coinpayportal";
 
 describe("verifyWebhookSignature", () => {
   const secret = "test-secret-key";
@@ -99,5 +104,116 @@ describe("SUPPORTED_CURRENCIES", () => {
     expect(SUPPORTED_CURRENCIES.btc.symbol).toBe("BTC");
     expect(SUPPORTED_CURRENCIES.eth.name).toBe("Ethereum");
     expect(SUPPORTED_CURRENCIES.eth.symbol).toBe("ETH");
+  });
+});
+
+describe("CoinPayPortal invoice API", () => {
+  const originalApiKey = process.env.COINPAY_API_KEY;
+  const originalMerchantId = process.env.COINPAY_MERCHANT_ID;
+  const originalUgigBusinessId = process.env.COINPAY_UGIG_BUSINESS_ID;
+  const originalBusinessId = process.env.COINPAY_BUSINESS_ID;
+  const originalGenericBusinessId = process.env.BUSINESS_ID;
+
+  beforeEach(() => {
+    process.env.COINPAY_API_KEY = "cp_live_" + "a".repeat(32);
+    process.env.COINPAY_MERCHANT_ID = "biz_123";
+    delete process.env.COINPAY_UGIG_BUSINESS_ID;
+    delete process.env.COINPAY_BUSINESS_ID;
+    delete process.env.BUSINESS_ID;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({
+          success: true,
+          invoice: {
+            id: "inv_123",
+            status: "draft",
+            amount: 25,
+            currency: "USD",
+          },
+        }),
+      })
+    );
+  });
+
+  afterEach(() => {
+    if (originalApiKey === undefined) {
+      delete process.env.COINPAY_API_KEY;
+    } else {
+      process.env.COINPAY_API_KEY = originalApiKey;
+    }
+
+    if (originalMerchantId === undefined) {
+      delete process.env.COINPAY_MERCHANT_ID;
+    } else {
+      process.env.COINPAY_MERCHANT_ID = originalMerchantId;
+    }
+
+    if (originalUgigBusinessId === undefined) {
+      delete process.env.COINPAY_UGIG_BUSINESS_ID;
+    } else {
+      process.env.COINPAY_UGIG_BUSINESS_ID = originalUgigBusinessId;
+    }
+
+    if (originalBusinessId === undefined) {
+      delete process.env.COINPAY_BUSINESS_ID;
+    } else {
+      process.env.COINPAY_BUSINESS_ID = originalBusinessId;
+    }
+
+    if (originalGenericBusinessId === undefined) {
+      delete process.env.BUSINESS_ID;
+    } else {
+      process.env.BUSINESS_ID = originalGenericBusinessId;
+    }
+
+    vi.unstubAllGlobals();
+  });
+
+  it("creates invoices with Bearer auth for CoinPayPortal compatibility", async () => {
+    await createInvoice({ amount: 25, currency: "USD", notes: "test invoice" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://coinpayportal.com/api/invoices",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.COINPAY_API_KEY}`,
+        }),
+      })
+    );
+  });
+
+  it("uses UGig-specific business id env aliases before the generic merchant id", async () => {
+    process.env.COINPAY_UGIG_BUSINESS_ID = "biz_ugig";
+    process.env.COINPAY_BUSINESS_ID = "biz_coinpay";
+    process.env.BUSINESS_ID = "biz_generic";
+    process.env.COINPAY_MERCHANT_ID = "biz_merchant";
+
+    await createInvoice({ amount: 25, currency: "USD", notes: "test invoice" });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://coinpayportal.com/api/invoices",
+      expect.objectContaining({
+        body: expect.stringContaining('"business_id":"biz_ugig"'),
+      })
+    );
+  });
+
+  it("sends invoices with Bearer auth for CoinPayPortal compatibility", async () => {
+    await sendInvoice("inv_123");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "https://coinpayportal.com/api/invoices/inv_123/send",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.COINPAY_API_KEY}`,
+        }),
+      })
+    );
   });
 });

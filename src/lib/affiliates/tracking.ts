@@ -1,15 +1,29 @@
 import { SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySupabase = any;
+
+async function getAttributionWindowStart(admin: SupabaseClient, offerId: string): Promise<string> {
+  const { data: offer } = await (admin as AnySupabase)
+    .from("affiliate_offers")
+    .select("cookie_days")
+    .eq("id", offerId)
+    .single();
+
+  const cookieDays = offer?.cookie_days || 30;
+  return new Date(Date.now() - cookieDays * 24 * 60 * 60 * 1000).toISOString();
+}
 
 /**
  * Generate a unique tracking code for an affiliate+offer pair.
  */
 export function generateTrackingCode(username: string, offerSlug: string): string {
   const base = `${username}-${offerSlug}`;
-  const hash = crypto.createHash("sha256").update(base + Date.now()).digest("hex").slice(0, 6);
+  const hash = crypto
+    .createHash("sha256")
+    .update(base + Date.now())
+    .digest("hex")
+    .slice(0, 6);
   return `${username}-${hash}`;
 }
 
@@ -55,8 +69,24 @@ export async function recordClick(
 
   const ipHash = ip ? hashIP(ip) : null;
 
-  // Rate limit: max 1 click per visitor per offer per hour
-  if (ipHash) {
+  // Deduplicate by visitorId + trackingCode within 24 hours
+  if (visitorId) {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await (admin as AnySupabase)
+      .from("affiliate_clicks")
+      .select("id", { count: "exact", head: true })
+      .eq("tracking_code", trackingCode)
+      .eq("visitor_id", visitorId)
+      .gte("created_at", oneDayAgo);
+
+    if ((count ?? 0) > 0) {
+      // Deduplicated — same visitor already clicked this link within 24h
+      return { ok: true, offer_id: app.offer_id };
+    }
+  }
+
+  // Rate limit: max 1 click per IP per offer per hour (fallback when no visitorId)
+  if (ipHash && !visitorId) {
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const { count } = await (admin as AnySupabase)
       .from("affiliate_clicks")
@@ -147,34 +177,35 @@ export async function findAttribution(
       .single();
 
     if (app) {
-      // Find the most recent click for this tracking code
+      const windowStart = await getAttributionWindowStart(admin, offerId);
+
+      // Require a real click inside the offer's attribution window.
       const { data: clicks } = await (admin as AnySupabase)
         .from("affiliate_clicks")
         .select("id")
         .eq("tracking_code", trackingCode)
+        .eq("offer_id", offerId)
+        .gte("created_at", windowStart)
         .order("created_at", { ascending: false })
         .limit(1);
+
+      if (!clicks || clicks.length === 0) {
+        return { affiliated: false };
+      }
 
       return {
         affiliated: true,
         affiliate_id: app.affiliate_id,
-        click_id: clicks?.[0]?.id,
+        click_id: clicks[0].id,
         tracking_code: app.tracking_code,
       };
     }
   }
 
-  if (!visitorId && !buyerId) return null;
+  if (!visitorId) return null;
 
   // Fallback: search by visitor_id within cookie window
-  const { data: offer } = await (admin as AnySupabase)
-    .from("affiliate_offers")
-    .select("cookie_days")
-    .eq("id", offerId)
-    .single();
-
-  const cookieDays = offer?.cookie_days || 30;
-  const windowStart = new Date(Date.now() - cookieDays * 24 * 60 * 60 * 1000).toISOString();
+  const windowStart = await getAttributionWindowStart(admin, offerId);
 
   let query = (admin as AnySupabase)
     .from("affiliate_clicks")
