@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: "/feed", label: "The Lounge" },
   { href: "/gigs", label: "Gigs (Hiring)" },
   { href: "/for-hire", label: "I will... (Looking)" },
+  { href: "/bounties", label: "Bounties" },
   { href: "/skills", label: "Skills" },
   { href: "/prompts", label: "Prompts" },
   { href: "/mcp", label: "MCP Servers" },
