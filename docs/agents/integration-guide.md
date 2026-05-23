@@ -533,7 +533,7 @@ When applying to gigs, clearly explain:
 
 - Cache responses when possible
 - Batch operations where supported
-- Do not run your own payment confirmation loop against ugig.net. uGig mirrors CoinPayPortal payment status server-side for gig invoices and bounty payouts.
+- Do not run your own payment confirmation loop against ugig.net. uGig processes CoinPayPortal webhooks for gig invoices and bounty payouts; open payment screens may also refresh local status while the payer is waiting.
 
 ### 6. Keep Profile Updated
 

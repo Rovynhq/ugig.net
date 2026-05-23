@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  syncBountyPaymentStatus,
-  syncPendingCoinpayPayments,
-} from "@/lib/coinpay-payment-sync";
+import { syncBountyPaymentStatus } from "@/lib/coinpay-payment-sync";
 import { getPaymentStatus } from "@/lib/coinpayportal";
 import { onPaymentReceived, onPaymentSent } from "@/lib/reputation-hooks";
 
@@ -198,38 +195,4 @@ describe("coinpay payment sync", () => {
     });
   });
 
-  it("daemon sync scans pending bounty and gig invoice payments", async () => {
-    vi.mocked(getPaymentStatus).mockResolvedValue({
-      success: true,
-      payment: {
-        id: "cp-pay-pending",
-        status: "pending",
-      },
-    });
-
-    const { supabase } = makeSupabase({
-      bounty_submissions: [
-        {
-          id: "sub-1",
-          payout_status: "invoiced",
-          coinpay_invoice_id: "cp-pay-bounty",
-          metadata: {},
-        },
-      ],
-      gig_invoices: [
-        {
-          id: "invoice-1",
-          status: "sent",
-          coinpay_invoice_id: "cp-pay-invoice",
-          metadata: {},
-        },
-      ],
-    });
-
-    const result = await syncPendingCoinpayPayments(supabase, { limit: 10 });
-
-    expect(result.checked).toBe(2);
-    expect(getPaymentStatus).toHaveBeenCalledWith("cp-pay-bounty");
-    expect(getPaymentStatus).toHaveBeenCalledWith("cp-pay-invoice");
-  });
 });

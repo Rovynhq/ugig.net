@@ -6,7 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 export const dynamic = "force-dynamic";
 
 // GET /api/bounties/[id]/submissions/[sid]/payment-status
-// User-triggered status refresh for a single bounty payout. The daemon handles
+// User-triggered status refresh for a single bounty payout. Webhooks handle
 // background confirmation; this lets an open bounty page update immediately.
 export async function GET(
   request: NextRequest,

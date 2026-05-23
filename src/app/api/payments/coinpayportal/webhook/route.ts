@@ -6,23 +6,32 @@ import { getUserDid, onPaymentReceived, onPaymentSent } from "@/lib/reputation-h
 
 // POST /api/payments/coinpayportal/webhook - Handle CoinPayPortal webhooks
 export async function POST(request: NextRequest) {
-  return processCoinPayWebhook(request, process.env.COINPAY_FUNDING_WEBHOOK_SECRET);
+  return processCoinPayWebhook(request, [
+    process.env.COINPAY_WEBHOOK_SECRET,
+    process.env.COINPAY_FUNDING_WEBHOOK_SECRET,
+  ]);
 }
 
 export async function processCoinPayWebhook(
   request: NextRequest,
-  webhookSecret: string | undefined
+  webhookSecret: string | Array<string | undefined> | undefined
 ) {
   try {
     const signature = request.headers.get("X-CoinPay-Signature");
     const rawBody = await request.text();
+    const webhookSecrets = (Array.isArray(webhookSecret) ? webhookSecret : [webhookSecret]).filter(
+      (secret): secret is string => Boolean(secret)
+    );
 
-    if (!webhookSecret) {
+    if (webhookSecrets.length === 0) {
       console.error("CoinPay webhook secret not configured");
       return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
     }
 
-    if (!signature || !verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+    if (
+      !signature ||
+      !webhookSecrets.some((secret) => verifyWebhookSignature(rawBody, signature, secret))
+    ) {
       console.error("Invalid webhook signature");
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
     }

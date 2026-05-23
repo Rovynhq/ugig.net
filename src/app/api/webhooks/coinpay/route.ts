@@ -8,5 +8,8 @@ import { processCoinPayWebhook } from "@/app/api/payments/coinpayportal/webhook/
  * crypto and Stripe-routed events with its own HMAC.
  */
 export async function POST(request: NextRequest) {
-  return processCoinPayWebhook(request, process.env.COINPAY_FUNDING_WEBHOOK_SECRET);
+  return processCoinPayWebhook(request, [
+    process.env.COINPAY_WEBHOOK_SECRET,
+    process.env.COINPAY_FUNDING_WEBHOOK_SECRET,
+  ]);
 }

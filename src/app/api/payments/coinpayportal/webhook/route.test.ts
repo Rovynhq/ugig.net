@@ -68,6 +68,7 @@ describe("POST /api/payments/coinpayportal/webhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.COINPAY_FUNDING_WEBHOOK_SECRET = WEBHOOK_SECRET;
+    delete process.env.COINPAY_WEBHOOK_SECRET;
   });
 
   it("returns 401 without signature", async () => {
@@ -131,6 +132,32 @@ describe("POST /api/payments/coinpayportal/webhook", () => {
 
     expect(res.status).toBe(200);
     expect(json.received).toBe(true);
+  });
+
+  it("accepts the primary CoinPay business webhook secret", async () => {
+    process.env.COINPAY_WEBHOOK_SECRET = "business_webhook_secret";
+    process.env.COINPAY_FUNDING_WEBHOOK_SECRET = "wrong_funding_secret";
+
+    const payload = makeWebhookPayload("payment.confirmed", {
+      payment_id: "pay_123",
+      amount_usd: 1,
+      status: "confirmed",
+    });
+
+    const paymentChain = chainResult({
+      data: { id: "local-1", user_id: "user-1", type: "tip", amount_usd: 1 },
+      error: null,
+    });
+    const okChain = chainResult({ data: null, error: null });
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "payments") return paymentChain;
+      return okChain;
+    });
+
+    const req = makeRequest(payload, "business_webhook_secret");
+    const res = await POST(req);
+    expect(res.status).toBe(200);
   });
 
   it("marks gig invoices paid when webhook payment is not in payments", async () => {

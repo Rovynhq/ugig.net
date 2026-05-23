@@ -86,7 +86,7 @@ export function ReviewPanel({ bountyId, payoutUsd, questions, submissions }: Rev
               changedStatuses[submission.id] = status;
             }
           } catch {
-            // Payment confirmation is also handled by the server daemon.
+            // Payment confirmation is also handled by CoinPay webhooks.
           }
         })
       );

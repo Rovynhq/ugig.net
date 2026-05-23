@@ -31,10 +31,6 @@ interface SyncResult {
   error?: string;
 }
 
-interface SyncPendingOptions {
-  limit?: number;
-}
-
 const PAYOUT_PENDING_STATUSES = new Set(["pending", "processing", "detected"]);
 const PAYOUT_PAID_STATUSES = new Set(["confirmed", "forwarded"]);
 const PAYOUT_FAILED_STATUSES = new Set(["expired", "failed"]);
@@ -547,80 +543,5 @@ export async function syncGigInvoicePaymentStatus(
     local_status: existingInvoice.status,
     upstream_status: upstreamStatus,
     changed: false,
-  };
-}
-
-export async function syncPendingCoinpayPayments(
-  supabase: Db,
-  options: SyncPendingOptions = {}
-): Promise<{
-  checked: number;
-  changed: number;
-  errors: number;
-  results: SyncResult[];
-}> {
-  const limit = Math.max(1, Math.min(options.limit ?? 25, 100));
-  const perTypeLimit = Math.ceil(limit / 2);
-
-  const [{ data: bountyRows, error: bountyError }, { data: invoiceRows, error: invoiceError }] =
-    await Promise.all([
-      (supabase.from("bounty_submissions") as any)
-        .select("id, coinpay_invoice_id")
-        .eq("payout_status", "invoiced")
-        .not("coinpay_invoice_id", "is", null)
-        .order("updated_at", { ascending: true })
-        .limit(perTypeLimit),
-      (supabase.from("gig_invoices") as any)
-        .select("id, coinpay_invoice_id")
-        .eq("status", "sent")
-        .not("coinpay_invoice_id", "is", null)
-        .order("updated_at", { ascending: true })
-        .limit(perTypeLimit),
-    ]);
-
-  if (bountyError) throw bountyError;
-  if (invoiceError) throw invoiceError;
-
-  const results: SyncResult[] = [];
-
-  for (const row of bountyRows || []) {
-    const paymentId = row.coinpay_invoice_id as string | null;
-    if (!paymentId) continue;
-    try {
-      results.push(await syncBountyPaymentStatus(supabase, paymentId));
-    } catch (err) {
-      results.push({
-        id: row.id,
-        coinpay_payment_id: paymentId,
-        kind: "bounty",
-        local_status: "error",
-        changed: false,
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  }
-
-  for (const row of invoiceRows || []) {
-    const paymentId = row.coinpay_invoice_id as string | null;
-    if (!paymentId) continue;
-    try {
-      results.push(await syncGigInvoicePaymentStatus(supabase, paymentId));
-    } catch (err) {
-      results.push({
-        id: row.id,
-        coinpay_payment_id: paymentId,
-        kind: "gig_invoice",
-        local_status: "error",
-        changed: false,
-        error: err instanceof Error ? err.message : "Unknown error",
-      });
-    }
-  }
-
-  return {
-    checked: results.length,
-    changed: results.filter((result) => result.changed).length,
-    errors: results.filter((result) => result.error).length,
-    results,
   };
 }
