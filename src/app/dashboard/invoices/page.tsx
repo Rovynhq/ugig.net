@@ -3,6 +3,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { InvoicePaymentActions } from "./InvoicePaymentActions";
 import {
   ArrowLeft,
   ExternalLink,
@@ -39,6 +40,13 @@ interface InvoiceRow {
   pay_url: string | null;
   notes: string | null;
   due_date: string | null;
+  metadata: {
+    payment_address?: string | null;
+    amount_crypto?: string | number | null;
+    payment_currency?: string | null;
+    checkout_url?: string | null;
+    expires_at?: string | null;
+  } | null;
   created_at: string;
   gig: { id: string; title: string } | null;
   worker: Counterparty | null;
@@ -245,24 +253,13 @@ export default async function InvoicesDashboardPage({
                       <p className="text-sm text-muted-foreground mb-3">{inv.notes}</p>
                     )}
 
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                       <span>
                         Created {new Date(inv.created_at).toLocaleDateString()}
                         {inv.due_date && (
                           <> · Due {new Date(inv.due_date).toLocaleDateString()}</>
                         )}
                       </span>
-                      {tab === "received" && inv.status === "sent" && inv.pay_url && (
-                        <a
-                          href={inv.pay_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-sm font-medium text-primary hover:underline"
-                        >
-                          <ExternalLink className="h-4 w-4" />
-                          Pay now
-                        </a>
-                      )}
                       {tab === "sent" && inv.status === "sent" && inv.pay_url && (
                         <a
                           href={inv.pay_url}
@@ -275,6 +272,22 @@ export default async function InvoicesDashboardPage({
                         </a>
                       )}
                     </div>
+
+                    {tab === "received" && (
+                      <div className="mt-3">
+                        <InvoicePaymentActions
+                          gigId={inv.gig_id}
+                          applicationId={inv.application_id}
+                          amountUsd={Number(inv.amount_usd)}
+                          currency={inv.currency}
+                          status={inv.status}
+                          payUrl={inv.pay_url}
+                          notes={inv.notes}
+                          dueDate={inv.due_date}
+                          metadata={inv.metadata}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
