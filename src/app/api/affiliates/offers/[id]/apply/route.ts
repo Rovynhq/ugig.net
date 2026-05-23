@@ -71,6 +71,11 @@ export async function POST(
     );
 
     const body = await request.json().catch(() => ({}));
+    const note = body.note;
+    if (note !== undefined && note !== null && typeof note !== "string") {
+      return NextResponse.json({ error: "note must be a string" }, { status: 400 });
+    }
+    const normalizedNote = typeof note === "string" ? note.trim() || null : null;
 
     // Auto-approve for now (sellers can change to manual later)
     const { data: application, error } = await (admin as AnySupabase)
