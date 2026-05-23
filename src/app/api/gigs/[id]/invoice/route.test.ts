@@ -204,16 +204,14 @@ describe("POST /api/gigs/[id]/invoice", () => {
     expect(res.status).toBe(400);
   });
 
-  it("creates invoice successfully", async () => {
+  it("creates a pending invoice successfully without creating a CoinPay payment", async () => {
     const gig = { id: GIG_ID, title: "Test Gig", poster_id: POSTER_ID, payment_coin: "SOL" };
     const application = { id: APP_ID, applicant_id: WORKER_ID, status: "accepted", proposed_rate: 150 };
     const invoiceRecord = {
       id: "local-inv-1",
       metadata: {
-        payment_address: "So11111111111111111111111111111111111111112",
-        amount_crypto: 0.75,
-        payment_currency: "sol",
-        expires_at: "2030-01-01T00:00:00Z",
+        invoice_currency: "USD",
+        initiated_by: "worker",
       },
     };
 
@@ -240,19 +238,6 @@ describe("POST /api/gigs/[id]/invoice", () => {
     });
 
     (getAuthContext as any).mockResolvedValue({ user: { id: WORKER_ID }, supabase: sb });
-    (resolveSupportedPaymentCurrency as any).mockResolvedValue("sol");
-    (createPayment as any).mockResolvedValue({
-      success: true,
-      payment_id: "cp-pay-1",
-      address: "So11111111111111111111111111111111111111112",
-      amount_crypto: 0.75,
-      currency: "sol",
-      expires_at: "2030-01-01T00:00:00Z",
-      payment: {
-        id: "cp-pay-1",
-        payment_address: "So11111111111111111111111111111111111111112",
-      },
-    });
 
     const res = await POST(
       req({ application_id: APP_ID, amount: 150, notes: "Work completed" }),
@@ -262,24 +247,12 @@ describe("POST /api/gigs/[id]/invoice", () => {
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.data.invoice_id).toBe("local-inv-1");
-    expect(body.data.coinpay_invoice_id).toBe("cp-pay-1");
+    expect(body.data.coinpay_invoice_id).toBeNull();
     expect(body.data.pay_url).toBeNull();
-    expect(body.data.payment_address).toBe("So11111111111111111111111111111111111111112");
-    expect(body.data.payment_currency).toBe("sol");
-
-    expect(createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        amount_usd: 150,
-        currency: "sol",
-        description: "Work completed",
-        expires_at: expect.any(String),
-        expires_in: 97200,
-      })
-    );
-    expect(resolveSupportedPaymentCurrency).toHaveBeenCalledWith(
-      "SOL",
-      expect.any(Object)
-    );
+    expect(body.data.payment_address).toBeNull();
+    expect(body.data.payment_currency).toBeNull();
+    expect(createPayment).not.toHaveBeenCalled();
+    expect(resolveSupportedPaymentCurrency).not.toHaveBeenCalled();
     expect(invoiceReceivedEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         workerName: "Test Worker",
@@ -327,19 +300,6 @@ describe("POST /api/gigs/[id]/invoice", () => {
     });
 
     (getAuthContext as any).mockResolvedValue({ user: { id: POSTER_ID }, supabase: sb });
-    (resolveSupportedPaymentCurrency as any).mockResolvedValue("sol");
-    (createPayment as any).mockResolvedValue({
-      success: true,
-      payment_id: "cp-pay-2",
-      address: "So11111111111111111111111111111111111111112",
-      amount_crypto: 1.0,
-      currency: "sol",
-      expires_at: "2030-01-01T00:00:00Z",
-      payment: {
-        id: "cp-pay-2",
-        payment_address: "So11111111111111111111111111111111111111112",
-      },
-    });
 
     const res = await POST(
       req({ application_id: APP_ID, amount: 200 }),
@@ -351,60 +311,14 @@ describe("POST /api/gigs/[id]/invoice", () => {
       worker_id: WORKER_ID,
       poster_id: POSTER_ID,
       amount_usd: 200,
+      coinpay_invoice_id: null,
+      metadata: expect.objectContaining({ initiated_by: "poster" }),
     });
-    expect(createPayment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        expires_at: expect.any(String),
-        expires_in: 97200,
-        metadata: expect.objectContaining({ initiated_by: "poster" }),
-      })
-    );
+    expect(createPayment).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
   });
 
-  it("rejects CoinPay payment requests that expire before 27 hours", async () => {
-    const gig = { id: GIG_ID, title: "Test Gig", poster_id: POSTER_ID, payment_coin: "SOL" };
-    const application = { id: APP_ID, applicant_id: WORKER_ID, status: "accepted", proposed_rate: 150 };
-    const invoiceInsert = vi.fn();
-
-    const sb = mockSupabase({
-      gigs: {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: gig, error: null }),
-      },
-      applications: {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: application, error: null }),
-      },
-      gig_invoices: mockInvoiceTable({ onInsert: invoiceInsert }),
-    });
-
-    (getAuthContext as any).mockResolvedValue({ user: { id: WORKER_ID }, supabase: sb });
-    (resolveSupportedPaymentCurrency as any).mockResolvedValue("sol");
-    (createPayment as any).mockResolvedValue({
-      success: true,
-      payment_id: "cp-pay-short",
-      address: "So11111111111111111111111111111111111111112",
-      amount_crypto: 0.75,
-      currency: "sol",
-      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      payment: {
-        id: "cp-pay-short",
-        payment_address: "So11111111111111111111111111111111111111112",
-      },
-    });
-
-    const res = await POST(req({ application_id: APP_ID, amount: 150 }), params);
-
-    expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.error).toContain("at least 27 hours");
-    expect(invoiceInsert).not.toHaveBeenCalled();
-  });
-
-  it("returns an existing unexpired invoice instead of creating another CoinPay payment", async () => {
+  it("returns an existing invoice instead of creating another invoice or CoinPay payment", async () => {
     const gig = { id: GIG_ID, title: "Test Gig", poster_id: POSTER_ID, payment_coin: "SOL" };
     const application = { id: APP_ID, applicant_id: WORKER_ID, status: "accepted", proposed_rate: 150 };
     const existingInvoice = {

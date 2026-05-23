@@ -50,11 +50,19 @@ describe("InvoicePaymentActions", () => {
     expect(screen.getAllByText("SolAddress123")).toHaveLength(2);
   });
 
-  it("asks the worker for a new invoice instead of recreating an expired payment", async () => {
+  it("creates a fresh payment request for an expired payment window", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       json: async () => ({
-        data: { requested: true },
+        data: {
+          pay_url: null,
+          metadata: {
+            payment_address: "NewSolAddress456",
+            amount_crypto: "0.5",
+            payment_currency: "SOL",
+            expires_at: "2030-01-01T00:00:00Z",
+          },
+        },
       }),
     });
 
@@ -70,11 +78,11 @@ describe("InvoicePaymentActions", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /request new invoice/i }));
+    fireEvent.click(screen.getByRole("button", { name: /pay now/i }));
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith(
-        "/api/gigs/gig-1/invoice/inv-1/request-new",
+        "/api/gigs/gig-1/invoice/inv-1/payment-request",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -83,9 +91,9 @@ describe("InvoicePaymentActions", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText(/worker has been asked/i)).toBeInTheDocument();
+      expect(screen.getAllByText("NewSolAddress456")).toHaveLength(2);
     });
-    expect(screen.queryByText("NewSolAddress456")).not.toBeInTheDocument();
+    expect(screen.getByText("0.5 SOL")).toBeInTheDocument();
   });
 
   it("can create a payment request when payment details are missing", async () => {
@@ -112,19 +120,12 @@ describe("InvoicePaymentActions", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /create payment request/i }));
+    fireEvent.click(screen.getByRole("button", { name: /pay now/i }));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/gigs/gig-1/invoice", {
+      expect(global.fetch).toHaveBeenCalledWith("/api/gigs/gig-1/invoice/inv-1/payment-request", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          application_id: "app-1",
-          amount: 12,
-          currency: "USD",
-          notes: "Work completed",
-          due_date: undefined,
-        }),
       });
     });
 

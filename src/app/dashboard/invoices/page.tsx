@@ -76,13 +76,21 @@ function statusBadge(status: InvoiceRow["status"]) {
     case "cancelled":
       return <Badge variant="secondary">Cancelled</Badge>;
     case "expired":
-      return <Badge variant="secondary">Expired</Badge>;
+      return (
+        <Badge className="gap-1 bg-blue-500/10 text-blue-600 border-blue-500/20">
+          <Send className="h-3 w-3" /> Awaiting payment
+        </Badge>
+      );
   }
 }
 
 function counterpartyName(c: Counterparty | null): string {
   if (!c) return "Unknown";
   return c.full_name || c.username || "Unknown";
+}
+
+function isAwaitingPayment(status: InvoiceRow["status"]) {
+  return status === "sent" || status === "expired";
 }
 
 export default async function InvoicesDashboardPage({
@@ -119,13 +127,13 @@ export default async function InvoicesDashboardPage({
   const received = invoices.filter((i) => i.poster_id === user.id);
 
   const totalOwed = received
-    .filter((i) => i.status === "sent")
+    .filter((i) => isAwaitingPayment(i.status))
     .reduce((s, i) => s + Number(i.amount_usd || 0), 0);
   const totalEarned = sent
     .filter((i) => i.status === "paid")
     .reduce((s, i) => s + Number(i.amount_usd || 0), 0);
   const totalPendingForMe = sent
-    .filter((i) => i.status === "sent")
+    .filter((i) => isAwaitingPayment(i.status))
     .reduce((s, i) => s + Number(i.amount_usd || 0), 0);
 
   const list = tab === "sent" ? sent : received;

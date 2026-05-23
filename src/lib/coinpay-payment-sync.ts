@@ -472,6 +472,9 @@ export async function syncGigInvoicePaymentStatus(
   }
 
   if (PAYOUT_FAILED_STATUSES.has(upstreamStatus)) {
+    const previousPaymentIds = Array.isArray(existingMetadata.previous_coinpay_invoice_ids)
+      ? existingMetadata.previous_coinpay_invoice_ids
+      : [];
     const metadata = {
       ...existingMetadata,
       coinpay_status: upstreamStatus,
@@ -482,15 +485,26 @@ export async function syncGigInvoicePaymentStatus(
       amount_crypto: cryptoAmount(payment) ?? existingMetadata.amount_crypto ?? null,
       expired_at: upstreamStatus === "expired" ? now : existingMetadata.expired_at,
       failed_at: upstreamStatus === "failed" ? now : existingMetadata.failed_at,
+      previous_coinpay_invoice_ids: [...previousPaymentIds, coinpayPaymentId],
+      expired_coinpay_invoice_id:
+        upstreamStatus === "expired" ? coinpayPaymentId : existingMetadata.expired_coinpay_invoice_id,
+      failed_coinpay_invoice_id:
+        upstreamStatus === "failed" ? coinpayPaymentId : existingMetadata.failed_coinpay_invoice_id,
+      payment_address: null,
+      checkout_url: null,
+      expires_at: null,
     };
 
     const { data: invoice, error: updateError } = await (supabase.from("gig_invoices") as any)
       .update({
-        status: upstreamStatus === "expired" ? "expired" : "cancelled",
+        status: "sent",
+        coinpay_invoice_id: null,
+        pay_url: null,
         metadata,
         updated_at: now,
       })
       .eq("id", existingInvoice.id)
+      .eq("coinpay_invoice_id", coinpayPaymentId)
       .eq("status", "sent")
       .select()
       .maybeSingle();
@@ -501,11 +515,14 @@ export async function syncGigInvoicePaymentStatus(
       await (supabase.from("notifications") as any).insert({
         user_id: invoice.worker_id,
         type: "payment_received",
-        title: upstreamStatus === "expired" ? "Invoice payment expired" : "Invoice payment failed",
+        title:
+          upstreamStatus === "expired"
+            ? "Invoice payment request expired"
+            : "Invoice payment request failed",
         body:
           upstreamStatus === "expired"
-            ? `The $${invoice.amount_usd} invoice payment request expired.`
-            : `The $${invoice.amount_usd} invoice payment request failed.`,
+            ? `The $${invoice.amount_usd} invoice is still open. The client can generate a fresh payment request when ready to pay.`
+            : `The $${invoice.amount_usd} invoice payment request failed. The client can generate a fresh payment request when ready to pay.`,
         data: {
           gig_id: invoice.gig_id,
           invoice_id: invoice.id,
@@ -517,7 +534,7 @@ export async function syncGigInvoicePaymentStatus(
       id: existingInvoice.id,
       coinpay_payment_id: coinpayPaymentId,
       kind: "gig_invoice",
-      local_status: upstreamStatus === "expired" ? "expired" : "cancelled",
+      local_status: "sent",
       upstream_status: upstreamStatus,
       changed: Boolean(invoice),
     };

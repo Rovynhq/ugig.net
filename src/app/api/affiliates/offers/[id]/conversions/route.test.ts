@@ -44,17 +44,6 @@ function makePutRequest(id: string, body: Record<string, unknown>) {
   });
 }
 
-function makePutRequest(id: string, body: Record<string, unknown>) {
-  return new NextRequest(
-    `http://localhost/api/affiliates/offers/${id}/conversions`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
-}
-
 function makeParams(id: string) {
   return { params: Promise.resolve({ id }) };
 }

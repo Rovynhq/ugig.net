@@ -32,13 +32,8 @@ interface InvoicePaymentActionsProps {
 export function InvoicePaymentActions({
   invoiceId,
   gigId,
-  applicationId,
-  amountUsd,
-  currency,
   status: initialStatus,
   payUrl: initialPayUrl,
-  notes,
-  dueDate,
   metadata: initialMetadata,
 }: InvoicePaymentActionsProps) {
   const router = useRouter();
@@ -107,51 +102,15 @@ export function InvoicePaymentActions({
     return () => window.clearInterval(interval);
   }, [checkPaymentStatus, paymentAddress, status]);
 
-  const requestNewInvoice = async () => {
-    setSubmitting(true);
-    setError(null);
-    setStatusMessage(null);
-
-    try {
-      const res = await fetch(
-        `/api/gigs/${gigId}/invoice/${invoiceId}/request-new`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-      const json = await res.json();
-
-      if (!res.ok) {
-        setError(json.error || "Failed to request a new invoice");
-        return;
-      }
-
-      setStatusMessage("The worker has been asked to send a fresh invoice.");
-      router.refresh();
-    } catch {
-      setError("Network error. Try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const createPaymentRequest = async () => {
     setSubmitting(true);
     setError(null);
     setStatusMessage(null);
 
     try {
-      const res = await fetch(`/api/gigs/${gigId}/invoice`, {
+      const res = await fetch(`/api/gigs/${gigId}/invoice/${invoiceId}/payment-request`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          application_id: applicationId,
-          amount: amountUsd,
-          currency,
-          notes: notes || undefined,
-          due_date: dueDate || undefined,
-        }),
       });
       const json = await res.json();
 
@@ -171,6 +130,7 @@ export function InvoicePaymentActions({
       setStatus("sent");
       setPayUrl(json.data?.pay_url || null);
       setMetadata(nextMetadata);
+      setStatusMessage("Payment request created at the current market rate.");
       router.refresh();
     } catch {
       setError("Network error. Try again.");
@@ -237,15 +197,15 @@ export function InvoicePaymentActions({
     <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
       <p className="text-sm text-muted-foreground">
         {status === "expired"
-          ? "This payment request expired. Ask the worker to send a fresh invoice before paying."
-          : "Payment details are missing. Create a new payment request to pay this invoice."}
+          ? "The last payment request expired, but this invoice is still payable. Create a fresh payment request when you're ready to pay."
+          : "Create a payment request when you're ready to pay. The crypto amount will be quoted at the current market rate."}
       </p>
       {statusMessage && <p className="text-sm text-green-700">{statusMessage}</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button
         type="button"
         size="sm"
-        onClick={status === "expired" ? requestNewInvoice : createPaymentRequest}
+        onClick={createPaymentRequest}
         disabled={submitting}
         className="gap-2"
       >
@@ -254,7 +214,7 @@ export function InvoicePaymentActions({
         ) : (
           <RefreshCw className="h-4 w-4" />
         )}
-        {status === "expired" ? "Request new invoice" : "Create payment request"}
+        Pay now
       </Button>
     </div>
   );

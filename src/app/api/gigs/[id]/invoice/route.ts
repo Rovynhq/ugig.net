@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient, getAuthContext } from "@/lib/auth/get-user";
-import { createPayment, resolveSupportedPaymentCurrency } from "@/lib/coinpayportal";
 import { invoiceReceivedEmail, sendEmail } from "@/lib/email";
 import { z } from "zod";
 
@@ -11,24 +10,6 @@ const createInvoiceSchema = z.object({
   notes: z.string().optional(),
   due_date: z.string().optional(),
 });
-
-const MIN_PAYMENT_REQUEST_HOURS = 27;
-const MIN_PAYMENT_REQUEST_SECONDS = MIN_PAYMENT_REQUEST_HOURS * 60 * 60;
-
-function getInvoiceExpiresAt(invoice: { metadata?: unknown }): Date | null {
-  const metadata =
-    invoice.metadata && typeof invoice.metadata === "object"
-      ? (invoice.metadata as Record<string, unknown>)
-      : null;
-  const expiresAt = typeof metadata?.expires_at === "string" ? metadata.expires_at : null;
-  if (!expiresAt) return null;
-  const date = new Date(expiresAt);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function minimumPaymentExpiresAt(): Date {
-  return new Date(Date.now() + MIN_PAYMENT_REQUEST_SECONDS * 1000);
-}
 
 // GET /api/gigs/[id]/invoice - Get invoices for a gig
 export async function GET(
@@ -139,119 +120,37 @@ export async function POST(
     const workerId = application.applicant_id;
     const posterId = gig.poster_id;
 
-    const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || "https://ugig.net";
-    const businessId = process.env.COINPAY_MERCHANT_ID;
-
     const { data: openInvoices } = await (supabase as any)
       .from("gig_invoices")
       .select("id, coinpay_invoice_id, pay_url, status, metadata")
       .eq("application_id", application_id)
-      .in("status", ["draft", "sent"])
+      .in("status", ["draft", "sent", "expired"])
       .order("created_at", { ascending: false })
       .limit(1);
 
     const openInvoice = openInvoices?.[0] || null;
     if (openInvoice) {
-      const expiresAt = getInvoiceExpiresAt(openInvoice);
-      if (!expiresAt || expiresAt >= minimumPaymentExpiresAt()) {
-        const metadata =
-          openInvoice.metadata && typeof openInvoice.metadata === "object"
-            ? (openInvoice.metadata as Record<string, unknown>)
-            : {};
-
-        return NextResponse.json(
-          {
-            data: {
-              invoice_id: openInvoice.id,
-              coinpay_invoice_id: openInvoice.coinpay_invoice_id,
-              pay_url: openInvoice.pay_url,
-              payment_address: metadata.payment_address || null,
-              amount_crypto: metadata.amount_crypto || null,
-              payment_currency: metadata.payment_currency || null,
-              expires_at: metadata.expires_at || null,
-              metadata: openInvoice.metadata,
-            },
-          },
-          { status: 200 }
-        );
-      }
-
-      await (supabase as any)
-        .from("gig_invoices")
-        .update({ status: "expired", updated_at: new Date().toISOString() })
-        .eq("id", openInvoice.id);
-    }
-
-    const paymentCurrency = await resolveSupportedPaymentCurrency(
-      (gig as any).payment_coin,
-      { business_id: businessId }
-    );
-
-    // Create a direct CoinPay payment request instead of a hosted invoice. The
-    // poster should see payment details inside uGig, not be redirected away.
-    const requiredExpiresAt = minimumPaymentExpiresAt();
-    const paymentResult = await createPayment({
-      amount_usd: amount,
-      currency: paymentCurrency,
-      description: notes || `Invoice for gig: ${gig.title}`,
-      business_id: businessId,
-      redirect_url: `${appUrl}/gigs/${gigId}?invoice=paid`,
-      expires_at: requiredExpiresAt.toISOString(),
-      expires_in: MIN_PAYMENT_REQUEST_SECONDS,
-      metadata: {
-        type: "gig_invoice",
-        gig_id: gigId,
-        application_id,
-        worker_id: workerId,
-        poster_id: posterId,
-        initiated_by: isPoster ? "poster" : "worker",
-        invoice_currency: currency,
-        payment_currency: paymentCurrency,
-        platform: "ugig.net",
-      },
-    });
-
-    const cpPayment = paymentResult.payment || paymentResult;
-    const paymentId = paymentResult.payment_id || (cpPayment as any).id;
-    const paymentAddress = (cpPayment as any).payment_address || paymentResult.address || null;
-    const checkoutUrl = paymentResult.checkout_url || (cpPayment as any).checkout_url || null;
-    const amountCrypto =
-      paymentResult.amount_crypto ||
-      (cpPayment as any).amount_crypto ||
-      (cpPayment as any).crypto_amount ||
-      null;
-    const expiresAt = paymentResult.expires_at || (cpPayment as any).expires_at || null;
-    const responseCurrency = paymentResult.currency || (cpPayment as any).currency || paymentCurrency;
-    const returnedExpiresAt = expiresAt ? new Date(expiresAt) : null;
-
-    if (!paymentId) {
-      return NextResponse.json(
-        { error: "CoinPay did not return a payment id" },
-        { status: 502 }
-      );
-    }
-
-    if (!paymentAddress) {
-      return NextResponse.json(
-        { error: "CoinPay did not return an in-app payment address" },
-        { status: 502 }
-      );
-    }
-
-    if (
-      !returnedExpiresAt ||
-      Number.isNaN(returnedExpiresAt.getTime()) ||
-      returnedExpiresAt.getTime() + 1000 < requiredExpiresAt.getTime()
-    ) {
+      const metadata =
+        openInvoice.metadata && typeof openInvoice.metadata === "object"
+          ? (openInvoice.metadata as Record<string, unknown>)
+          : {};
       return NextResponse.json(
         {
-          error: `CoinPay payment requests must remain open for at least ${MIN_PAYMENT_REQUEST_HOURS} hours`,
+          data: {
+            invoice_id: openInvoice.id,
+            coinpay_invoice_id: openInvoice.coinpay_invoice_id,
+            pay_url: openInvoice.pay_url,
+            payment_address: metadata.payment_address || null,
+            amount_crypto: metadata.amount_crypto || null,
+            payment_currency: metadata.payment_currency || null,
+            expires_at: metadata.expires_at || null,
+            metadata: openInvoice.metadata,
+          },
         },
-        { status: 502 }
+        { status: 200 }
       );
     }
 
-    // Create local invoice record
     const { data: invoice, error } = await (supabase as any)
       .from("gig_invoices")
       .insert({
@@ -259,7 +158,7 @@ export async function POST(
         application_id,
         worker_id: workerId,
         poster_id: posterId,
-        coinpay_invoice_id: paymentId,
+        coinpay_invoice_id: null,
         amount_usd: amount,
         currency,
         status: "sent",
@@ -267,11 +166,8 @@ export async function POST(
         notes,
         due_date: due_date || null,
         metadata: {
-          payment_address: paymentAddress,
-          amount_crypto: amountCrypto,
-          payment_currency: responseCurrency,
-          checkout_url: checkoutUrl,
-          expires_at: expiresAt,
+          invoice_currency: currency,
+          initiated_by: isPoster ? "poster" : "worker",
         },
       })
       .select()
@@ -342,12 +238,12 @@ export async function POST(
     return NextResponse.json({
       data: {
         invoice_id: invoice.id,
-        coinpay_invoice_id: paymentId,
+        coinpay_invoice_id: null,
         pay_url: null,
-        payment_address: paymentAddress,
-        amount_crypto: amountCrypto,
-        payment_currency: responseCurrency,
-        expires_at: expiresAt,
+        payment_address: null,
+        amount_crypto: null,
+        payment_currency: null,
+        expires_at: null,
         metadata: invoice.metadata,
       },
     }, { status: 201 });

@@ -19,6 +19,7 @@ interface GigInvoice {
     payment_address?: string | null;
     amount_crypto?: number | string | null;
     payment_currency?: string | null;
+    checkout_url?: string | null;
     expires_at?: string | null;
   } | null;
   worker?: { id: string; username: string; full_name?: string };
@@ -47,6 +48,7 @@ export function InvoiceButton({
   const [showForm, setShowForm] = useState(false);
   const [invoices, setInvoices] = useState<GigInvoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [payingInvoiceId, setPayingInvoiceId] = useState<string | null>(null);
   const [amount, setAmount] = useState(budgetAmount?.toString() || "");
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -126,6 +128,46 @@ export function InvoiceButton({
     }
   };
 
+  const handleCreatePaymentRequest = async (invoiceId: string) => {
+    setPayingInvoiceId(invoiceId);
+    setError(null);
+
+    try {
+      const response = await fetch(`/api/gigs/${gigId}/invoice/${invoiceId}/payment-request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setError(result.error || "Failed to create payment request");
+        return;
+      }
+
+      setInvoices((prev) =>
+        prev.map((inv) =>
+          inv.id === invoiceId
+            ? {
+                ...inv,
+                status: "sent",
+                pay_url: result.data?.pay_url || null,
+                metadata: result.data?.metadata || {
+                  payment_address: result.data?.payment_address,
+                  amount_crypto: result.data?.amount_crypto,
+                  payment_currency: result.data?.payment_currency,
+                  expires_at: result.data?.expires_at,
+                },
+              }
+            : inv
+        )
+      );
+    } catch {
+      setError("An error occurred. Please try again.");
+    } finally {
+      setPayingInvoiceId(null);
+    }
+  };
+
   const statusBadge = (status: string) => {
     switch (status) {
       case "draft":
@@ -154,8 +196,8 @@ export function InvoiceButton({
         );
       case "expired":
         return (
-          <Badge variant="secondary" className="gap-1 text-muted-foreground">
-            Expired
+          <Badge className="gap-1 bg-blue-500/10 text-blue-600 border-blue-500/20">
+            <Send className="h-3 w-3" /> Awaiting payment
           </Badge>
         );
       default:
@@ -197,14 +239,30 @@ export function InvoiceButton({
                 amountCrypto={inv.metadata.amount_crypto}
                 paymentCurrency={inv.metadata.payment_currency}
                 expiresAt={inv.metadata.expires_at}
-                checkoutUrl={inv.pay_url || undefined}
+                checkoutUrl={inv.pay_url || inv.metadata.checkout_url || undefined}
               />
             )}
 
-            {isPoster && inv.status === "sent" && !inv.metadata?.payment_address && (
-              <p className="text-sm text-muted-foreground">
-                Payment details are not available. Ask the worker to resend the invoice.
-              </p>
+            {isPoster && (inv.status === "expired" || (inv.status === "sent" && !inv.metadata?.payment_address)) && (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Pay when you are ready. The crypto amount will be quoted at the current market rate.
+                </p>
+                {error && <p className="text-sm text-destructive">{error}</p>}
+                <Button
+                  size="sm"
+                  onClick={() => handleCreatePaymentRequest(inv.id)}
+                  disabled={payingInvoiceId === inv.id}
+                  className="gap-2"
+                >
+                  {payingInvoiceId === inv.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <DollarSign className="h-4 w-4" />
+                  )}
+                  Pay now
+                </Button>
+              </div>
             )}
 
             {/* Worker: show pay link status */}
