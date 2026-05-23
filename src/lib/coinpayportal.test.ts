@@ -283,6 +283,23 @@ describe("CoinPayPortal payment API", () => {
     });
   });
 
+  it("passes explicit payment expiry fields through to CoinPay", async () => {
+    await createPayment({
+      amount_usd: 2,
+      currency: "sol",
+      expires_at: "2030-01-01T00:00:00.000Z",
+      expires_in: 97200,
+    });
+
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string);
+
+    expect(body).toMatchObject({
+      expires_at: "2030-01-01T00:00:00.000Z",
+      expires_in: 97200,
+    });
+  });
+
   it("includes the raw CoinPay failure body in thrown errors", async () => {
     vi.stubGlobal(
       "fetch",

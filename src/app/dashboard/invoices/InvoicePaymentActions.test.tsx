@@ -6,7 +6,12 @@ vi.mock("@/components/funding/QRCode", () => ({
   QRCodeCanvas: ({ value }: { value: string }) => <div data-testid="qr-code">{value}</div>,
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+
 const baseProps = {
+  invoiceId: "inv-1",
   gigId: "gig-1",
   applicationId: "app-1",
   amountUsd: 12,
@@ -35,7 +40,7 @@ describe("InvoicePaymentActions", () => {
           payment_address: "SolAddress123",
           amount_crypto: "0.25",
           payment_currency: "SOL",
-          expires_at: "2026-05-24T00:00:00Z",
+          expires_at: "2030-01-01T00:00:00Z",
         }}
       />
     );
@@ -45,19 +50,11 @@ describe("InvoicePaymentActions", () => {
     expect(screen.getAllByText("SolAddress123")).toHaveLength(2);
   });
 
-  it("can create a new payment request for an expired invoice", async () => {
+  it("asks the worker for a new invoice instead of recreating an expired payment", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       json: async () => ({
-        data: {
-          pay_url: null,
-          metadata: {
-            payment_address: "NewSolAddress456",
-            amount_crypto: "0.5",
-            payment_currency: "SOL",
-            expires_at: "2026-05-24T00:00:00Z",
-          },
-        },
+        data: { requested: true },
       }),
     });
 
@@ -73,7 +70,49 @@ describe("InvoicePaymentActions", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /create new payment request/i }));
+    fireEvent.click(screen.getByRole("button", { name: /request new invoice/i }));
+
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith(
+        "/api/gigs/gig-1/invoice/inv-1/request-new",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/worker has been asked/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("NewSolAddress456")).not.toBeInTheDocument();
+  });
+
+  it("can create a payment request when payment details are missing", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          pay_url: null,
+          metadata: {
+            payment_address: "NewSolAddress456",
+            amount_crypto: "0.5",
+            payment_currency: "SOL",
+            expires_at: "2030-01-01T00:00:00Z",
+          },
+        },
+      }),
+    });
+
+    render(
+      <InvoicePaymentActions
+        {...baseProps}
+        status="sent"
+        metadata={null}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /create payment request/i }));
 
     await waitFor(() => {
       expect(global.fetch).toHaveBeenCalledWith("/api/gigs/gig-1/invoice", {

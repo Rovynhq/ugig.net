@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { CryptoPaymentBox } from "@/components/payments/CryptoPaymentBox";
-import { Loader2, RefreshCw } from "lucide-react";
+import { CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
 type InvoiceStatus = "draft" | "sent" | "paid" | "cancelled" | "expired";
 
@@ -16,6 +17,7 @@ interface InvoicePaymentMetadata {
 }
 
 interface InvoicePaymentActionsProps {
+  invoiceId: string;
   gigId: string;
   applicationId: string;
   amountUsd: number;
@@ -28,6 +30,7 @@ interface InvoicePaymentActionsProps {
 }
 
 export function InvoicePaymentActions({
+  invoiceId,
   gigId,
   applicationId,
   amountUsd,
@@ -38,18 +41,105 @@ export function InvoicePaymentActions({
   dueDate,
   metadata: initialMetadata,
 }: InvoicePaymentActionsProps) {
+  const router = useRouter();
   const [status, setStatus] = useState<InvoiceStatus>(initialStatus);
   const [payUrl, setPayUrl] = useState(initialPayUrl);
   const [metadata, setMetadata] = useState<InvoicePaymentMetadata | null>(initialMetadata);
   const [submitting, setSubmitting] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const paymentAddress = metadata?.payment_address || null;
   const checkoutUrl = payUrl || metadata?.checkout_url || null;
 
+  const checkPaymentStatus = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (status !== "sent" || !paymentAddress) return;
+
+      if (!silent) {
+        setChecking(true);
+        setError(null);
+      }
+
+      try {
+        const res = await fetch(
+          `/api/gigs/${gigId}/invoice/${invoiceId}/payment-status`,
+          { cache: "no-store" }
+        );
+        const json = await res.json();
+
+        if (!res.ok) {
+          if (!silent) setError(json.error || "Failed to check payment status");
+          return;
+        }
+
+        const nextStatus = json.data?.status as InvoiceStatus | undefined;
+        if (nextStatus) setStatus(nextStatus);
+        if (json.data?.pay_url !== undefined) setPayUrl(json.data.pay_url);
+        if (json.data?.metadata) setMetadata(json.data.metadata);
+
+        if (nextStatus === "paid") {
+          setStatusMessage("Payment confirmed.");
+          router.refresh();
+        } else if (nextStatus === "expired") {
+          setStatusMessage("Payment request expired.");
+          router.refresh();
+        } else if (!silent) {
+          setStatusMessage("Still waiting for confirmation.");
+        }
+      } catch {
+        if (!silent) setError("Network error. Try again.");
+      } finally {
+        if (!silent) setChecking(false);
+      }
+    },
+    [gigId, invoiceId, paymentAddress, router, status]
+  );
+
+  useEffect(() => {
+    if (status !== "sent" || !paymentAddress) return;
+
+    const interval = window.setInterval(() => {
+      void checkPaymentStatus({ silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [checkPaymentStatus, paymentAddress, status]);
+
+  const requestNewInvoice = async () => {
+    setSubmitting(true);
+    setError(null);
+    setStatusMessage(null);
+
+    try {
+      const res = await fetch(
+        `/api/gigs/${gigId}/invoice/${invoiceId}/request-new`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+      const json = await res.json();
+
+      if (!res.ok) {
+        setError(json.error || "Failed to request a new invoice");
+        return;
+      }
+
+      setStatusMessage("The worker has been asked to send a fresh invoice.");
+      router.refresh();
+    } catch {
+      setError("Network error. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const createPaymentRequest = async () => {
     setSubmitting(true);
     setError(null);
+    setStatusMessage(null);
 
     try {
       const res = await fetch(`/api/gigs/${gigId}/invoice`, {
@@ -81,6 +171,7 @@ export function InvoicePaymentActions({
       setStatus("sent");
       setPayUrl(json.data?.pay_url || null);
       setMetadata(nextMetadata);
+      router.refresh();
     } catch {
       setError("Network error. Try again.");
     } finally {
@@ -88,35 +179,73 @@ export function InvoicePaymentActions({
     }
   };
 
-  if (status === "paid" || status === "cancelled" || status === "draft") {
+  if (status === "paid") {
+    return (
+      <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-4 text-sm text-green-700">
+        <div className="flex items-center gap-2 font-medium">
+          <CheckCircle2 className="h-4 w-4" />
+          Payment confirmed
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "cancelled" || status === "draft") {
     return null;
   }
 
   if (status === "sent" && paymentAddress) {
     return (
-      <CryptoPaymentBox
-        title="Invoice payment"
-        paymentAddress={paymentAddress}
-        amountCrypto={metadata?.amount_crypto}
-        paymentCurrency={metadata?.payment_currency}
-        expiresAt={metadata?.expires_at}
-        checkoutUrl={checkoutUrl}
-      />
+      <div className="space-y-3">
+        <CryptoPaymentBox
+          title="Invoice payment"
+          paymentAddress={paymentAddress}
+          amountCrypto={metadata?.amount_crypto}
+          paymentCurrency={metadata?.payment_currency}
+          expiresAt={metadata?.expires_at}
+          checkoutUrl={checkoutUrl}
+        />
+
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            Waiting for payment confirmation.
+            {statusMessage ? ` ${statusMessage}` : ""}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => checkPaymentStatus()}
+            disabled={checking}
+            className="gap-2 self-start sm:self-auto"
+          >
+            {checking ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            Check payment
+          </Button>
+        </div>
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+      </div>
     );
   }
 
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
+    <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
       <p className="text-sm text-muted-foreground">
         {status === "expired"
-          ? "This payment request expired. Create a new one to pay this invoice."
+          ? "This payment request expired. Ask the worker to send a fresh invoice before paying."
           : "Payment details are missing. Create a new payment request to pay this invoice."}
       </p>
+      {statusMessage && <p className="text-sm text-green-700">{statusMessage}</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button
         type="button"
         size="sm"
-        onClick={createPaymentRequest}
+        onClick={status === "expired" ? requestNewInvoice : createPaymentRequest}
         disabled={submitting}
         className="gap-2"
       >
@@ -125,7 +254,7 @@ export function InvoicePaymentActions({
         ) : (
           <RefreshCw className="h-4 w-4" />
         )}
-        Create new payment request
+        {status === "expired" ? "Request new invoice" : "Create payment request"}
       </Button>
     </div>
   );

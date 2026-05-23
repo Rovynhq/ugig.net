@@ -213,7 +213,7 @@ describe("POST /api/gigs/[id]/invoice", () => {
         payment_address: "So11111111111111111111111111111111111111112",
         amount_crypto: 0.75,
         payment_currency: "sol",
-        expires_at: "2026-05-22T12:00:00Z",
+        expires_at: "2030-01-01T00:00:00Z",
       },
     };
 
@@ -247,7 +247,7 @@ describe("POST /api/gigs/[id]/invoice", () => {
       address: "So11111111111111111111111111111111111111112",
       amount_crypto: 0.75,
       currency: "sol",
-      expires_at: "2026-05-22T12:00:00Z",
+      expires_at: "2030-01-01T00:00:00Z",
       payment: {
         id: "cp-pay-1",
         payment_address: "So11111111111111111111111111111111111111112",
@@ -272,6 +272,8 @@ describe("POST /api/gigs/[id]/invoice", () => {
         amount_usd: 150,
         currency: "sol",
         description: "Work completed",
+        expires_at: expect.any(String),
+        expires_in: 97200,
       })
     );
     expect(resolveSupportedPaymentCurrency).toHaveBeenCalledWith(
@@ -332,7 +334,7 @@ describe("POST /api/gigs/[id]/invoice", () => {
       address: "So11111111111111111111111111111111111111112",
       amount_crypto: 1.0,
       currency: "sol",
-      expires_at: "2026-05-22T12:00:00Z",
+      expires_at: "2030-01-01T00:00:00Z",
       payment: {
         id: "cp-pay-2",
         payment_address: "So11111111111111111111111111111111111111112",
@@ -352,10 +354,54 @@ describe("POST /api/gigs/[id]/invoice", () => {
     });
     expect(createPayment).toHaveBeenCalledWith(
       expect.objectContaining({
+        expires_at: expect.any(String),
+        expires_in: 97200,
         metadata: expect.objectContaining({ initiated_by: "poster" }),
       })
     );
     expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("rejects CoinPay payment requests that expire before 27 hours", async () => {
+    const gig = { id: GIG_ID, title: "Test Gig", poster_id: POSTER_ID, payment_coin: "SOL" };
+    const application = { id: APP_ID, applicant_id: WORKER_ID, status: "accepted", proposed_rate: 150 };
+    const invoiceInsert = vi.fn();
+
+    const sb = mockSupabase({
+      gigs: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: gig, error: null }),
+      },
+      applications: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: application, error: null }),
+      },
+      gig_invoices: mockInvoiceTable({ onInsert: invoiceInsert }),
+    });
+
+    (getAuthContext as any).mockResolvedValue({ user: { id: WORKER_ID }, supabase: sb });
+    (resolveSupportedPaymentCurrency as any).mockResolvedValue("sol");
+    (createPayment as any).mockResolvedValue({
+      success: true,
+      payment_id: "cp-pay-short",
+      address: "So11111111111111111111111111111111111111112",
+      amount_crypto: 0.75,
+      currency: "sol",
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      payment: {
+        id: "cp-pay-short",
+        payment_address: "So11111111111111111111111111111111111111112",
+      },
+    });
+
+    const res = await POST(req({ application_id: APP_ID, amount: 150 }), params);
+
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toContain("at least 27 hours");
+    expect(invoiceInsert).not.toHaveBeenCalled();
   });
 
   it("returns an existing unexpired invoice instead of creating another CoinPay payment", async () => {
@@ -370,7 +416,7 @@ describe("POST /api/gigs/[id]/invoice", () => {
         payment_address: "So11111111111111111111111111111111111111112",
         amount_crypto: 0.75,
         payment_currency: "sol",
-        expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        expires_at: new Date(Date.now() + 28 * 60 * 60 * 1000).toISOString(),
       },
     };
 

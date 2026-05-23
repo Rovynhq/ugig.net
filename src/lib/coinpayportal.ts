@@ -33,6 +33,8 @@ export interface CreatePaymentOptions {
   currency: "usdc_pol" | "usdc_sol" | "pol" | "sol" | "btc" | "eth" | "usdc_eth" | "usdt";
   description?: string;
   redirect_url?: string;
+  expires_at?: string;
+  expires_in?: number;
   metadata?: Record<string, unknown>;
   business_id?: string;
 }
@@ -161,6 +163,8 @@ export async function createPayment(options: CreatePaymentOptions): Promise<Crea
       success_url: options.redirect_url || appUrl,
       cancel_url: options.redirect_url || appUrl,
       redirect_url: options.redirect_url,
+      expires_at: options.expires_at,
+      expires_in: options.expires_in,
       webhook_url: `${appUrl}/api/webhooks/coinpay`,
       metadata: options.metadata,
     }),

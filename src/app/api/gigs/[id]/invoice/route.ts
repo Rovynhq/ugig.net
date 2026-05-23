@@ -12,6 +12,9 @@ const createInvoiceSchema = z.object({
   due_date: z.string().optional(),
 });
 
+const MIN_PAYMENT_REQUEST_HOURS = 27;
+const MIN_PAYMENT_REQUEST_SECONDS = MIN_PAYMENT_REQUEST_HOURS * 60 * 60;
+
 function getInvoiceExpiresAt(invoice: { metadata?: unknown }): Date | null {
   const metadata =
     invoice.metadata && typeof invoice.metadata === "object"
@@ -21,6 +24,10 @@ function getInvoiceExpiresAt(invoice: { metadata?: unknown }): Date | null {
   if (!expiresAt) return null;
   const date = new Date(expiresAt);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function minimumPaymentExpiresAt(): Date {
+  return new Date(Date.now() + MIN_PAYMENT_REQUEST_SECONDS * 1000);
 }
 
 // GET /api/gigs/[id]/invoice - Get invoices for a gig
@@ -146,7 +153,7 @@ export async function POST(
     const openInvoice = openInvoices?.[0] || null;
     if (openInvoice) {
       const expiresAt = getInvoiceExpiresAt(openInvoice);
-      if (!expiresAt || expiresAt > new Date()) {
+      if (!expiresAt || expiresAt >= minimumPaymentExpiresAt()) {
         const metadata =
           openInvoice.metadata && typeof openInvoice.metadata === "object"
             ? (openInvoice.metadata as Record<string, unknown>)
@@ -182,12 +189,15 @@ export async function POST(
 
     // Create a direct CoinPay payment request instead of a hosted invoice. The
     // poster should see payment details inside uGig, not be redirected away.
+    const requiredExpiresAt = minimumPaymentExpiresAt();
     const paymentResult = await createPayment({
       amount_usd: amount,
       currency: paymentCurrency,
       description: notes || `Invoice for gig: ${gig.title}`,
       business_id: businessId,
       redirect_url: `${appUrl}/gigs/${gigId}?invoice=paid`,
+      expires_at: requiredExpiresAt.toISOString(),
+      expires_in: MIN_PAYMENT_REQUEST_SECONDS,
       metadata: {
         type: "gig_invoice",
         gig_id: gigId,
@@ -212,6 +222,7 @@ export async function POST(
       null;
     const expiresAt = paymentResult.expires_at || (cpPayment as any).expires_at || null;
     const responseCurrency = paymentResult.currency || (cpPayment as any).currency || paymentCurrency;
+    const returnedExpiresAt = expiresAt ? new Date(expiresAt) : null;
 
     if (!paymentId) {
       return NextResponse.json(
@@ -223,6 +234,19 @@ export async function POST(
     if (!paymentAddress) {
       return NextResponse.json(
         { error: "CoinPay did not return an in-app payment address" },
+        { status: 502 }
+      );
+    }
+
+    if (
+      !returnedExpiresAt ||
+      Number.isNaN(returnedExpiresAt.getTime()) ||
+      returnedExpiresAt.getTime() + 1000 < requiredExpiresAt.getTime()
+    ) {
+      return NextResponse.json(
+        {
+          error: `CoinPay payment requests must remain open for at least ${MIN_PAYMENT_REQUEST_HOURS} hours`,
+        },
         { status: 502 }
       );
     }

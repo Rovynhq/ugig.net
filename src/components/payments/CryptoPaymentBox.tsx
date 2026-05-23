@@ -35,15 +35,22 @@ export function CryptoPaymentBox({
   };
 
   return (
-    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
+    <div className="rounded-lg border border-border bg-muted/30 p-4 sm:p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <span className="text-sm font-semibold text-foreground">{title}</span>
+          {amountLabel && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Send the exact amount to the address below.
+            </p>
+          )}
+        </div>
         {checkoutUrl && (
           <a
             href={checkoutUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
           >
             <ExternalLink className="h-3 w-3" />
             Open
@@ -51,31 +58,36 @@ export function CryptoPaymentBox({
         )}
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[132px_1fr] sm:items-start">
-        <div className="rounded bg-background p-2 w-fit">
-          <QRCodeCanvas value={paymentAddress} size={112} />
+      <div className="grid gap-4 sm:grid-cols-[164px_1fr] sm:items-start">
+        <div className="w-fit rounded-md border border-border bg-background p-2">
+          <QRCodeCanvas value={paymentAddress} size={148} />
         </div>
 
-        <div className="min-w-0 space-y-2">
+        <div className="min-w-0 space-y-4">
           {amountLabel && (
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{amountLabel}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 text-xs"
-                onClick={() => copy(String(amountCrypto), "amount")}
-                disabled={amountCrypto == null || amountCrypto === ""}
-              >
-                <Copy className="h-3 w-3" />
-                {copied === "amount" ? "Copied" : "Copy"}
-              </Button>
+            <div className="rounded-md border border-border bg-background p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-xs font-medium text-muted-foreground">Amount</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs"
+                  onClick={() => copy(String(amountCrypto), "amount")}
+                  disabled={amountCrypto == null || amountCrypto === ""}
+                >
+                  <Copy className="h-3 w-3" />
+                  {copied === "amount" ? "Copied" : "Copy"}
+                </Button>
+              </div>
+              <code className="block break-all text-sm font-semibold">
+                {amountLabel}
+              </code>
             </div>
           )}
 
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-2">
+          <div className="rounded-md border border-border bg-background p-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
               <span className="text-xs font-medium text-muted-foreground">Address</span>
               <Button
                 type="button"
@@ -88,7 +100,7 @@ export function CryptoPaymentBox({
                 {copied === "address" ? "Copied" : "Copy"}
               </Button>
             </div>
-            <code className="block break-all rounded bg-background px-2 py-1.5 text-xs">
+            <code className="block break-all text-xs leading-relaxed">
               {paymentAddress}
             </code>
           </div>

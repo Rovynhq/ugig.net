@@ -276,6 +276,7 @@ export default async function InvoicesDashboardPage({
                     {tab === "received" && (
                       <div className="mt-3">
                         <InvoicePaymentActions
+                          invoiceId={inv.id}
                           gigId={inv.gig_id}
                           applicationId={inv.application_id}
                           amountUsd={Number(inv.amount_usd)}
