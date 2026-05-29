@@ -8,9 +8,11 @@ vi.mock("@/lib/auth/get-user", () => ({
 }));
 
 const mockFrom = vi.fn();
+const mockRpc = vi.fn();
 vi.mock("@/lib/supabase/service", () => ({
   createServiceClient: () => ({
     from: (...args: unknown[]) => mockFrom(...args),
+    rpc: (...args: unknown[]) => mockRpc(...args),
   }),
 }));
 
@@ -32,6 +34,7 @@ function makePatchRequest(body: BodyInit, contentType = "application/json") {
 describe("PATCH /api/affiliates/offers/[id]/applications", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRpc.mockResolvedValue({ data: null, error: null });
     mockGetAuthContext.mockResolvedValue({
       user: { id: "seller-1", authMethod: "session" },
     });
@@ -66,39 +69,25 @@ describe("PATCH /api/affiliates/offers/[id]/applications", () => {
     let updatePayload: Record<string, unknown> | undefined;
     let notificationPayload: Record<string, unknown> | undefined;
 
+    mockRpc.mockResolvedValue({
+      data: updatedApplication,
+      error: null,
+    });
+
     mockFrom.mockImplementation((table: string) => {
-      if (table === "affiliate_offers") {
+      if (table === "affiliate_applications") {
         return {
           select: () => ({
             eq: () => ({
-              single: () =>
-                Promise.resolve({
-                  data: { id: "offer-1", seller_id: "seller-1" },
-                  error: null,
-                }),
+              eq: () => ({
+                single: () =>
+                  Promise.resolve({
+                    data: updatedApplication,
+                    error: null,
+                  }),
+              }),
             }),
           }),
-        };
-      }
-
-      if (table === "affiliate_applications") {
-        return {
-          update: (payload: Record<string, unknown>) => {
-            updatePayload = payload;
-            return {
-              eq: () => ({
-                eq: () => ({
-                  select: () => ({
-                    single: () =>
-                      Promise.resolve({
-                        data: updatedApplication,
-                        error: null,
-                      }),
-                  }),
-                }),
-              }),
-            };
-          },
         };
       }
 
@@ -124,12 +113,77 @@ describe("PATCH /api/affiliates/offers/[id]/applications", () => {
 
     expect(res.status).toBe(200);
     expect(body.application).toEqual(updatedApplication);
-    expect(updatePayload).toMatchObject({ status: "approved" });
-    expect(updatePayload?.approved_at).toEqual(expect.any(String));
+    expect(updatePayload).toBeUndefined();
+    expect(mockRpc).toHaveBeenCalledWith("moderate_affiliate_application", {
+      p_offer_id: "offer-1",
+      p_application_id: "app-1",
+      p_seller_id: "seller-1",
+      p_status: "approved",
+    });
     expect(notificationPayload).toMatchObject({
       user_id: "affiliate-1",
       type: "affiliate_approved",
       data: { offer_id: "offer-1", application_id: "app-1" },
+    });
+  });
+
+  it("decrements the affiliate count when an approved application is rejected", async () => {
+    const updatedApplication = {
+      id: "app-1",
+      offer_id: "offer-1",
+      affiliate_id: "affiliate-1",
+      status: "rejected",
+      profiles: { username: "alice" },
+    };
+    let updatePayload: Record<string, unknown> | undefined;
+
+    mockRpc.mockResolvedValue({
+      data: updatedApplication,
+      error: null,
+    });
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "affiliate_applications") {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: () =>
+                  Promise.resolve({
+                    data: updatedApplication,
+                    error: null,
+                  }),
+              }),
+            }),
+          }),
+        };
+      }
+
+      if (table === "notifications") {
+        return {
+          insert: () => Promise.resolve({ data: null, error: null }),
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const res = await PATCH(
+      makePatchRequest(
+        JSON.stringify({ application_id: "app-1", action: "reject" })
+      ),
+      makeParams("offer-1")
+    );
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.application).toEqual(updatedApplication);
+    expect(updatePayload).toBeUndefined();
+    expect(mockRpc).toHaveBeenCalledWith("moderate_affiliate_application", {
+      p_offer_id: "offer-1",
+      p_application_id: "app-1",
+      p_seller_id: "seller-1",
+      p_status: "rejected",
     });
   });
 });

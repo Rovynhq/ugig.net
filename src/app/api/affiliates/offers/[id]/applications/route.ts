@@ -88,46 +88,41 @@ export async function PATCH(
       return NextResponse.json({ error: "application_id and action (approve|reject) required" }, { status: 400 });
     }
 
-    const admin = createServiceClient();
-
-    // Verify seller ownership
-    const { data: offer } = await (admin as AnySupabase)
-      .from("affiliate_offers")
-      .select("id, seller_id")
-      .eq("id", id)
-      .single();
-
-    if (!offer || offer.seller_id !== auth.user.id) {
-      return NextResponse.json({ error: "Not found or not authorized" }, { status: 404 });
-    }
-
     const status = action === "approve" ? "approved" : "rejected";
-    const updateData: Record<string, unknown> = {
-      status,
-      updated_at: new Date().toISOString(),
-    };
-    if (status === "approved") {
-      updateData.approved_at = new Date().toISOString();
-    }
 
-    const { data: application, error } = await (admin as AnySupabase)
-      .from("affiliate_applications")
-      .update(updateData)
-      .eq("id", application_id)
-      .eq("offer_id", id)
-      .select(`*, profiles!affiliate_applications_affiliate_id_fkey(username)`)
-      .single();
+    const admin = createServiceClient();
+    const { data: moderatedApplication, error } = await (admin as AnySupabase)
+      .rpc("moderate_affiliate_application", {
+        p_offer_id: id,
+        p_application_id: application_id,
+        p_seller_id: auth.user.id,
+        p_status: status,
+      });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      const statusCode =
+        error.message === "Not found or not authorized" ||
+        error.message === "Application not found"
+          ? 404
+          : 400;
+      return NextResponse.json({ error: error.message }, { status: statusCode });
     }
+
+    const { data: application } = await (admin as AnySupabase)
+      .from("affiliate_applications")
+      .select(`*, profiles!affiliate_applications_affiliate_id_fkey(username)`)
+      .eq("id", application_id)
+      .eq("offer_id", id)
+      .single();
+
+    const responseApplication = application || moderatedApplication;
 
     // Notify affiliate
     const notificationType = status === "approved" ? "affiliate_approved" : "affiliate_rejected";
     await (admin as AnySupabase)
       .from("notifications")
       .insert({
-        user_id: application.affiliate_id,
+        user_id: responseApplication.affiliate_id,
         type: notificationType,
         title: status === "approved" ? "Affiliate application approved! 🎉" : "Affiliate application declined",
         body: status === "approved"
@@ -136,7 +131,7 @@ export async function PATCH(
         data: { offer_id: id, application_id },
       });
 
-    return NextResponse.json({ application });
+    return NextResponse.json({ application: responseApplication });
   } catch {
     return NextResponse.json({ error: "An unexpected error occurred" }, { status: 500 });
   }
