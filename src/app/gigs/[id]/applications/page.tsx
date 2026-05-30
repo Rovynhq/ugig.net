@@ -54,7 +54,7 @@ export default async function ApplicationsPage({ params }: ApplicationsPageProps
   // Get gig details
   const { data: gig, error } = await supabase
     .from("gigs")
-    .select("id, title, poster_id, status, budget_min, budget_max")
+    .select("id, title, poster_id, status, budget_type, budget_min, budget_max, payment_coin")
     .eq("id", id)
     .single();
 
@@ -479,6 +479,8 @@ export default async function ApplicationsPage({ params }: ApplicationsPageProps
                             isPoster={true}
                             isWorker={false}
                             budgetAmount={app.proposed_rate || gig.budget_min || gig.budget_max}
+                            gigPaymentCoin={gig.payment_coin}
+                            gigBudgetType={gig.budget_type}
                           />
                         </div>
                       )}

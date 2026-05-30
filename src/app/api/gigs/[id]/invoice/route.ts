@@ -7,6 +7,7 @@ import {
   preferredCoinToPaymentCurrency,
 } from "@/lib/coinpayportal";
 import { invoiceReceivedEmail, sendEmail } from "@/lib/email";
+import { getBtcUsdRate, isSatsCoin, satsToUsd } from "@/lib/rates";
 import { z } from "zod";
 
 const lineItemSchema = z.object({
@@ -104,18 +105,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       due_date,
     } = validationResult.data;
 
-    // The total (amount_usd) is the authoritative amount CoinPay charges.
+    // The amounts arriving from the client are in the posting's NATIVE unit:
+    // sats for SATS/LN/BTC gigs, USD otherwise. We validate them in that unit,
+    // then convert to USD below for amount_usd (the value CoinPay charges).
     const lineItems = items ?? [];
-    const total =
+    const nativeTotal =
       lineItems.length > 0
         ? Math.round(lineItems.reduce((sum, it) => sum + it.amount, 0) * 100) /
           100
         : (amount as number);
 
-    // Get gig
+    // Get gig — need budget fields to cap the invoice to the agreed amount.
     const { data: gig } = await supabase
       .from("gigs")
-      .select("id, title, poster_id, payment_coin")
+      .select("id, title, poster_id, payment_coin, budget_type, budget_min, budget_max")
       .eq("id", gigId)
       .single();
 
@@ -152,6 +155,46 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         { status: 400 }
       );
     }
+
+    // Stop made-up amounts: the invoice can't exceed the agreed amount for the
+    // posting. The agreed amount is the accepted rate, falling back to the gig's
+    // budget. Only enforced for fixed-price gigs — hourly/per-task/per-unit
+    // totals legitimately exceed the single quoted rate.
+    const isSats = isSatsCoin(gig.payment_coin);
+    const nativeUnit = isSats ? "sats" : "USD";
+    const budgetType = gig.budget_type || "fixed";
+    const agreedCap =
+      application.proposed_rate ?? gig.budget_max ?? gig.budget_min ?? null;
+
+    if (budgetType === "fixed" && agreedCap != null && nativeTotal > agreedCap + 1e-6) {
+      const fmt = (n: number) =>
+        isSats ? `${n.toLocaleString()} sats` : `$${n.toFixed(2)}`;
+      return NextResponse.json(
+        {
+          error: `Invoice total (${fmt(nativeTotal)}) exceeds the agreed amount for this gig (${fmt(
+            agreedCap
+          )}).`,
+        },
+        { status: 400 }
+      );
+    }
+
+    // Convert the native total to USD — the canonical amount CoinPay charges.
+    // For sats gigs this is where "500 sats" becomes its real ~$0.x value
+    // instead of being mistaken for $500.
+    let btcUsd: number | null = null;
+    if (isSats) {
+      btcUsd = await getBtcUsdRate();
+      if (!btcUsd) {
+        return NextResponse.json(
+          { error: "Couldn't fetch the current BTC price to price this invoice. Try again shortly." },
+          { status: 503 }
+        );
+      }
+    }
+    const toUsd = (nativeAmount: number) =>
+      isSats ? satsToUsd(nativeAmount, btcUsd as number) : nativeAmount;
+    const total = toUsd(nativeTotal);
 
     const workerId = application.applicant_id;
     const posterId = gig.poster_id;
@@ -260,6 +303,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           receiver_payment_currency: selectedWallet.currency,
           merchant_wallet_address: selectedWallet.address,
           merchant_wallet_label: selectedWallet.label,
+          // Audit trail for the posting-native amount this USD total came from.
+          posting_coin: gig.payment_coin || null,
+          native_unit: nativeUnit,
+          native_amount: nativeTotal,
+          ...(isSats ? { btc_usd_rate: btcUsd } : {}),
         },
       })
       .select()
@@ -277,7 +325,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const rows = lineItems.map((it, idx) => ({
         invoice_id: invoice.id,
         description: (it.description || "").slice(0, 500),
-        amount_usd: it.amount,
+        amount_usd: toUsd(it.amount),
         position: idx,
       }));
       const { error: itemsError } = await (svc as any)

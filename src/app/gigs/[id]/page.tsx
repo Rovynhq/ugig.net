@@ -473,6 +473,7 @@ export default async function GigPage({ params }: GigPageProps) {
                               isWorker={true}
                               budgetAmount={userAcceptedApplication.proposed_rate}
                               gigPaymentCoin={gig.payment_coin}
+                              gigBudgetType={gig.budget_type}
                             />
                           )}
                         </>

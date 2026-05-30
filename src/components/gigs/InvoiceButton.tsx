@@ -77,11 +77,20 @@ interface InvoiceButtonProps {
   currentUserId: string;
   isPoster: boolean;
   isWorker: boolean;
+  /** The agreed amount in the posting's native unit (sats for SATS/LN/BTC gigs,
+   * USD otherwise). Pre-fills the invoice and, for fixed-price gigs, caps it. */
   budgetAmount: number | null;
   /** The gig/bounty's stated payment coin (e.g. "SOL"); used to pre-select the
    * worker's matching CoinPay receiving wallet. */
   gigPaymentCoin?: string | null;
+  /** The gig's budget_type; the amount cap only applies to fixed-price gigs. */
+  gigBudgetType?: string | null;
 }
+
+// Sats-denominated coins price the posting in sats, not USD.
+const SATS_COINS = ["SATS", "LN", "BTC"];
+const coinIsSats = (coin?: string | null) =>
+  SATS_COINS.includes((coin || "").trim().toUpperCase());
 
 export function InvoiceButton({
   gigId,
@@ -91,7 +100,12 @@ export function InvoiceButton({
   isWorker,
   budgetAmount,
   gigPaymentCoin,
+  gigBudgetType,
 }: InvoiceButtonProps) {
+  const isSats = coinIsSats(gigPaymentCoin);
+  // The cap applies to fixed-price gigs; hourly/per-task totals can exceed the rate.
+  const capAmount =
+    (gigBudgetType || "fixed") === "fixed" && budgetAmount ? budgetAmount : null;
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -180,6 +194,13 @@ export function InvoiceButton({
       return;
     }
     const total = Math.round(lineItems.reduce((s, it) => s + it.amount, 0) * 100) / 100;
+
+    if (capAmount != null && total > capAmount + 1e-6) {
+      const fmt = (n: number) =>
+        isSats ? `${n.toLocaleString()} sats` : `$${n.toFixed(2)}`;
+      setError(`Invoice total (${fmt(total)}) can't exceed the agreed amount (${fmt(capAmount)}).`);
+      return;
+    }
 
     setIsCreating(true);
     setError(null);
@@ -471,6 +492,8 @@ export function InvoiceButton({
 
         {isWorker && showForm && (
           <InvoiceForm
+            isSats={isSats}
+            capAmount={capAmount}
             items={items}
             setItems={setItems}
             notes={notes}
@@ -502,6 +525,8 @@ export function InvoiceButton({
     if (showForm) {
       return (
         <InvoiceForm
+          isSats={isSats}
+          capAmount={capAmount}
           items={items}
           setItems={setItems}
           notes={notes}
@@ -529,7 +554,12 @@ export function InvoiceButton({
     return (
       <Button onClick={() => setShowForm(true)} variant="default" className="gap-2">
         <FileText className="h-4 w-4" />
-        Send Invoice{budgetAmount ? ` ($${budgetAmount})` : ""}
+        Send Invoice
+        {budgetAmount
+          ? isSats
+            ? ` (${budgetAmount.toLocaleString()} sats)`
+            : ` ($${budgetAmount})`
+          : ""}
       </Button>
     );
   }
@@ -543,6 +573,8 @@ export function InvoiceButton({
 type LineItem = { description: string; amount: string };
 
 function InvoiceForm({
+  isSats,
+  capAmount,
   items,
   setItems,
   notes,
@@ -561,6 +593,8 @@ function InvoiceForm({
   onSubmit,
   onCancel,
 }: {
+  isSats: boolean;
+  capAmount: number | null;
   items: LineItem[];
   setItems: (v: LineItem[]) => void;
   notes: string;
@@ -581,6 +615,9 @@ function InvoiceForm({
 }) {
   const hasWallets = wallets.length > 0;
   const total = items.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+  const overCap = capAmount != null && total > capAmount + 1e-6;
+  const fmtAmount = (n: number) =>
+    isSats ? `${n.toLocaleString()} sats` : `$${n.toFixed(2)}`;
   const updateItem = (i: number, patch: Partial<LineItem>) =>
     setItems(items.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
   const addItem = () => setItems([...items, { description: "", amount: "" }]);
@@ -602,19 +639,28 @@ function InvoiceForm({
               placeholder="Description (e.g. Logo design)"
               className="flex-1 text-sm border rounded-md px-2 py-1.5 bg-background"
             />
-            <div className="relative w-28 shrink-0">
-              <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                $
-              </span>
+            <div className="relative w-32 shrink-0">
+              {!isSats && (
+                <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                  $
+                </span>
+              )}
               <input
                 type="number"
                 value={item.amount}
                 onChange={(e) => updateItem(i, { amount: e.target.value })}
-                placeholder="0.00"
-                min="0.01"
-                step="0.01"
-                className="w-full text-sm border rounded-md pl-5 pr-2 py-1.5 bg-background"
+                placeholder={isSats ? "0" : "0.00"}
+                min={isSats ? "1" : "0.01"}
+                step={isSats ? "1" : "0.01"}
+                className={`w-full text-sm border rounded-md py-1.5 bg-background ${
+                  isSats ? "pl-2 pr-10" : "pl-5 pr-2"
+                }`}
               />
+              {isSats && (
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  sats
+                </span>
+              )}
             </div>
             <Button
               type="button"
@@ -641,9 +687,20 @@ function InvoiceForm({
           </Button>
           <span className="text-sm">
             Total{" "}
-            <span className="font-semibold tabular-nums">${total.toFixed(2)}</span>
+            <span
+              className={`font-semibold tabular-nums ${overCap ? "text-destructive" : ""}`}
+            >
+              {fmtAmount(total)}
+            </span>
           </span>
         </div>
+        {capAmount != null && (
+          <p className={`text-xs ${overCap ? "text-destructive" : "text-muted-foreground"}`}>
+            {overCap
+              ? `Over the agreed amount (${fmtAmount(capAmount)}). Lower the total to send.`
+              : `Agreed amount for this gig: ${fmtAmount(capAmount)}.`}
+          </p>
+        )}
       </div>
 
       <div className="space-y-1">
@@ -736,7 +793,7 @@ function InvoiceForm({
       <div className="flex gap-2">
         <Button
           onClick={onSubmit}
-          disabled={isCreating || total <= 0 || !hasWallets}
+          disabled={isCreating || total <= 0 || overCap || !hasWallets}
           className="flex-1"
           size="sm"
         >

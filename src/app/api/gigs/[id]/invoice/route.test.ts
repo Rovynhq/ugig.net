@@ -36,6 +36,12 @@ vi.mock("@/lib/email", () => ({
   sendEmail: vi.fn().mockResolvedValue({ success: true }),
 }));
 
+// Keep isSatsCoin/satsToUsd real; pin the BTC price so sats→USD is deterministic.
+vi.mock("@/lib/rates", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/rates")>("@/lib/rates");
+  return { ...actual, getBtcUsdRate: vi.fn().mockResolvedValue(100_000) };
+});
+
 import { GET, POST } from "./route";
 import { getAuthContext } from "@/lib/auth/get-user";
 import {
@@ -428,5 +434,111 @@ describe("POST /api/gigs/[id]/invoice", () => {
     expect(body.data.coinpay_invoice_id).toBe("cp-pay-existing");
     expect(body.data.payment_address).toBe("So11111111111111111111111111111111111111112");
     expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invoice total above the agreed amount on a fixed-price gig", async () => {
+    const gig = {
+      id: GIG_ID,
+      title: "Test Gig",
+      poster_id: POSTER_ID,
+      payment_coin: "SOL",
+      budget_type: "fixed",
+      budget_min: 100,
+      budget_max: 200,
+    };
+    const application = {
+      id: APP_ID,
+      applicant_id: WORKER_ID,
+      status: "accepted",
+      proposed_rate: 150,
+    };
+
+    const sb = mockSupabase({
+      gigs: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: gig, error: null }),
+      },
+      applications: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: application, error: null }),
+      },
+    });
+    (getAuthContext as any).mockResolvedValue({ user: { id: WORKER_ID }, supabase: sb });
+
+    const res = await POST(req({ application_id: APP_ID, amount: 999 }), params);
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/exceeds the agreed amount/i);
+    // Rejected before any wallet/payment work happens.
+    expect(createPayment).not.toHaveBeenCalled();
+  });
+
+  it("denominates a sats gig's invoice in USD instead of treating sats as dollars", async () => {
+    const gig = {
+      id: GIG_ID,
+      title: "Sats Gig",
+      poster_id: POSTER_ID,
+      payment_coin: "SATS",
+      budget_type: "fixed",
+      budget_min: 500,
+      budget_max: 500,
+    };
+    const application = {
+      id: APP_ID,
+      applicant_id: WORKER_ID,
+      status: "accepted",
+      proposed_rate: 500,
+    };
+
+    let inserted: any = null;
+    const sb = mockSupabase({
+      gigs: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: gig, error: null }),
+      },
+      applications: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: application, error: null }),
+      },
+      gig_invoices: mockInvoiceTable({
+        insertResult: { id: "local-inv-sats", metadata: {} },
+        onInsert: (row) => {
+          inserted = row;
+        },
+      }),
+      profiles: {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi
+          .fn()
+          .mockResolvedValue({ data: { username: "w", full_name: "W" }, error: null }),
+      },
+      notifications: { insert: vi.fn().mockResolvedValue({ error: null }) },
+    });
+    (getAuthContext as any).mockResolvedValue({ user: { id: WORKER_ID }, supabase: sb });
+
+    const res = await POST(
+      req({
+        application_id: APP_ID,
+        amount: 500,
+        payment_currency: "sol",
+        merchant_wallet_address: "So11111111111111111111111111111111111111112",
+      }),
+      params
+    );
+
+    expect(res.status).toBe(201);
+    // 500 sats at $100,000/BTC = $0.50, NOT $500.
+    expect(inserted.amount_usd).toBe(0.5);
+    expect(inserted.metadata).toMatchObject({
+      posting_coin: "SATS",
+      native_unit: "sats",
+      native_amount: 500,
+    });
   });
 });
