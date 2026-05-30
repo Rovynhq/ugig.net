@@ -36,6 +36,17 @@ function walletLabel(wallet: CoinPayWalletOption) {
   return `${label}${coin.toUpperCase()} (${shortAddress(wallet.address)})`;
 }
 
+// Does this wallet pay out in the gig/bounty's stated coin? Matches a native
+// coin (SOL, ETH, BTC, POL, USDC, USDT…) or a rail-specific currency key whose
+// base is that coin (e.g. gig coin "USDC" → the worker's "usdc_sol" wallet).
+function walletMatchesCoin(wallet: CoinPayWalletOption, coin?: string | null) {
+  const want = (coin || "").trim().toUpperCase();
+  if (!want) return false;
+  const cc = (wallet.cryptocurrency || "").toUpperCase();
+  const cur = (wallet.currency || "").toUpperCase();
+  return cc === want || cur === want || cur.startsWith(`${want}_`);
+}
+
 interface GigInvoice {
   id: string;
   amount_usd: number;
@@ -67,6 +78,9 @@ interface InvoiceButtonProps {
   isPoster: boolean;
   isWorker: boolean;
   budgetAmount: number | null;
+  /** The gig/bounty's stated payment coin (e.g. "SOL"); used to pre-select the
+   * worker's matching CoinPay receiving wallet. */
+  gigPaymentCoin?: string | null;
 }
 
 export function InvoiceButton({
@@ -76,6 +90,7 @@ export function InvoiceButton({
   isPoster,
   isWorker,
   budgetAmount,
+  gigPaymentCoin,
 }: InvoiceButtonProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,7 +146,12 @@ export function InvoiceButton({
       }
       const nextWallets = Array.isArray(result.data?.wallets) ? result.data.wallets : [];
       setWallets(nextWallets);
-      setSelectedWalletKey(nextWallets[0] ? walletKey(nextWallets[0]) : "");
+      // Default to the wallet matching the gig/bounty's payment coin (most gigs
+      // are SOL), falling back to the first wallet if the worker has none for it.
+      const preferred =
+        nextWallets.find((w: CoinPayWalletOption) => walletMatchesCoin(w, gigPaymentCoin)) ||
+        nextWallets[0];
+      setSelectedWalletKey(preferred ? walletKey(preferred) : "");
       setOauthRequired(Boolean(result.data?.oauth_required));
       setWalletInstructions(
         Array.isArray(result.data?.setup_instructions) ? result.data.setup_instructions : []
@@ -143,7 +163,7 @@ export function InvoiceButton({
       setWalletsLoaded(true);
       setWalletsLoading(false);
     }
-  }, []);
+  }, [gigPaymentCoin]);
 
   useEffect(() => {
     if (showForm && isWorker && !walletsLoaded && !walletsLoading) {
