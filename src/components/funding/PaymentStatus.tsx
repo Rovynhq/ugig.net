@@ -1,11 +1,19 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 
 function PaymentStatusInner() {
   const searchParams = useSearchParams();
   const payment = searchParams.get("payment");
+
+  useEffect(() => {
+    if (payment !== "success") return;
+    const paymentId = sessionStorage.getItem("pending_card_payment_id");
+    if (!paymentId) return;
+    sessionStorage.removeItem("pending_card_payment_id");
+    fetch(`/api/funding/status?payment_id=${paymentId}`).catch(() => {});
+  }, [payment]);
 
   if (payment === "success") {
     return (

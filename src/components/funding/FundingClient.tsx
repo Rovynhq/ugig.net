@@ -133,6 +133,7 @@ export function FundingClient() {
 
       // Card → CoinPay returns a Stripe checkout URL; redirect.
       if (data.checkout_url) {
+        if (data.payment_id) sessionStorage.setItem("pending_card_payment_id", data.payment_id);
         window.location.href = data.checkout_url;
         return;
       }
