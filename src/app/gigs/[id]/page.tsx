@@ -479,12 +479,12 @@ export default async function GigPage({ params }: GigPageProps) {
                         </>
                       ) : (
                         <Link href={`/gigs/${id}/apply`} className="block">
-                          <Button className="w-full">Apply Now</Button>
+                          <Button className="w-full">{isForHire ? "Hire Now" : "Apply Now"}</Button>
                         </Link>
                       )
                     ) : (
                       <Link href={`/login?redirect=/gigs/${id}`} className="block">
-                        <Button className="w-full">Log in to Apply</Button>
+                        <Button className="w-full">{isForHire ? "Log in to Hire" : "Log in to Apply"}</Button>
                       </Link>
                     )}
                   </>
