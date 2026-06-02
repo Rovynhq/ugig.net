@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getAuthContext } from "@/lib/auth/get-user";
 import { createServiceClient } from "@/lib/supabase/service";
+import { walletAddressSchema } from "@/lib/validations";
 
 /**
  * GET /api/profile/wallet-addresses
@@ -88,6 +90,52 @@ export async function GET(request: NextRequest) {
   } catch {
     return NextResponse.json(
       { error: "Failed to fetch wallet addresses" },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * PUT /api/profile/wallet-addresses
+ * Replace the current user's stored wallet addresses.
+ * Body: { wallet_addresses: Array<{ currency, address, is_preferred? }> }
+ *
+ * Used by the CLI to import CoinPay global wallet addresses into the profile
+ * so they are visible to gig posters without requiring OAuth lookups.
+ */
+export async function PUT(request: NextRequest) {
+  try {
+    const auth = await getAuthContext(request);
+    if (!auth) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const { user, supabase } = auth;
+
+    const body = await request.json();
+    const parsed = z.object({
+      wallet_addresses: z.array(walletAddressSchema).max(20),
+    }).safeParse(body);
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: parsed.error.issues[0]?.message ?? "Invalid wallet addresses" },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ wallet_addresses: parsed.data.wallet_addresses })
+      .eq("id", user.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ data: { wallet_addresses: parsed.data.wallet_addresses } });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to update wallet addresses" },
       { status: 500 }
     );
   }
