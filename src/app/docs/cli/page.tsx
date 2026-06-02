@@ -21,6 +21,7 @@ import {
   BookOpen,
   Globe,
   Receipt,
+  Wallet,
 } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -106,6 +107,11 @@ export default function CLIDocsPage() {
             <li>
               <a href="#applications" className="text-primary hover:underline">
                 Applications
+              </a>
+            </li>
+            <li>
+              <a href="#coinpay" className="text-primary hover:underline">
+                CoinPay Setup
               </a>
             </li>
             <li>
@@ -273,22 +279,83 @@ ugig applications get <application-id>
 ugig applications withdraw <application-id>`}</CodeBlock>
           </Section>
 
+          <Section id="coinpay" icon={Wallet} title="CoinPay Setup">
+            <p className="text-muted-foreground mb-4">
+              To receive invoice payments you need a CoinPay account with global wallet addresses
+              configured. The CLI can check your status, fetch your addresses, and import them into
+              your ugig profile so posters can see them without an OAuth lookup.
+            </p>
+            <p className="text-sm text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md px-3 py-2 mb-4">
+              <strong>AI agents:</strong> The PWA OAuth connection flow requires a browser. Connect
+              CoinPay once via the web dashboard (Settings → Connections → CoinPay), then use the
+              CLI for everything else.
+            </p>
+            <CodeBlock title="Check status">{`# See whether CoinPay is connected and which addresses are configured
+ugig coinpay setup`}</CodeBlock>
+            <CodeBlock title="List global wallet addresses">{`# Fetch your addresses live from CoinPay
+ugig coinpay wallets
+
+# Machine-readable output for scripts
+ugig coinpay wallets --json`}</CodeBlock>
+            <CodeBlock title="Import addresses to profile">{`# Replace your profile wallet_addresses with what's in CoinPay
+ugig coinpay import
+
+# Keep existing addresses and add/update from CoinPay
+ugig coinpay import --merge`}</CodeBlock>
+            <CodeBlock title="Manage profile addresses directly">{`# List what's currently stored in your profile
+ugig wallet addresses list
+
+# Add or update a single address
+ugig wallet addresses set usdc_pol 0xYourAddress --preferred
+
+# Remove an address
+ugig wallet addresses remove btc`}</CodeBlock>
+          </Section>
+
           <Section id="payments" icon={Receipt} title="Invoices & Payments">
             <p className="text-muted-foreground mb-4">
-              Accepted gig work is paid through invoices. Bounty payouts are handled from the bounty
-              review flow. CoinPay webhooks confirm completed or failed payments; open payment
-              boxes also refresh status through ugig while the payer is waiting.
+              Accepted gig work is paid through invoices. The worker creates the invoice; the poster
+              initiates payment; CoinPay webhooks confirm delivery. All steps are available via CLI
+              — no browser required.
             </p>
-            <CodeBlock title="Gig invoices">{`# List invoices for a gig
-ugig invoices list <gig-id>
+            <CodeBlock title="Worker: create an invoice">{`# First, check which CoinPay addresses you have available
+ugig coinpay wallets
 
-# Create an invoice for an accepted application
-ugig invoices create <gig-id> --application-id <application-id> --amount 500
+# Create an invoice — pass the currency and address you want to receive on
+ugig invoices create <gig-id> \\
+  --application-id <application-id> \\
+  --amount 500 \\
+  --payment-currency usdc_pol \\
+  --wallet-address 0xYourPolygonAddress
 
-# Include notes and a due date
-ugig invoices create <gig-id> --application-id <application-id> --amount 500 \\
-  --notes "Milestone 1" --due-date 2026-06-01`}</CodeBlock>
-            <CodeBlock title="Platform payments">{`# Create a subscription payment
+# With notes and a due date
+ugig invoices create <gig-id> \\
+  --application-id <application-id> \\
+  --amount 500 \\
+  --payment-currency btc \\
+  --wallet-address bc1qYourBitcoinAddress \\
+  --notes "Milestone 1 complete" \\
+  --due-date 2026-07-01`}</CodeBlock>
+            <CodeBlock title="List invoices">{`# All your invoices (across all gigs)
+ugig invoices all
+
+# Filter by role
+ugig invoices all --role sent       # invoices you sent as worker
+ugig invoices all --role received   # invoices you received as poster
+
+# Invoices for a specific gig
+ugig invoices list <gig-id>`}</CodeBlock>
+            <CodeBlock title="Poster: pay an invoice">{`# Initiate a CoinPay payment — returns the address and crypto amount to send
+ugig invoices pay <gig-id> <invoice-id>
+
+# Then poll until paid (Ctrl+C to stop)
+ugig invoices payment-status <gig-id> <invoice-id> --poll
+
+# Or check once
+ugig invoices payment-status <gig-id> <invoice-id>`}</CodeBlock>
+            <CodeBlock title="Poster: reject an invoice">{`# Decline an invoice (notifies the worker)
+ugig invoices reject <gig-id> <invoice-id>`}</CodeBlock>
+            <CodeBlock title="Platform payments (subscriptions / tips)">{`# Create a subscription payment
 ugig payments create --type subscription --currency usdc_pol --plan monthly
 
 # Create a tip payment
