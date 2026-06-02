@@ -17,9 +17,6 @@ importers:
       '@profullstack/emailer':
         specifier: ^1.0.1
         version: 1.0.1
-      '@profullstack/referrals':
-        specifier: file:../referrals
-        version: file:../referrals(react@19.2.3)
       '@stripe/stripe-js':
         specifier: ^8.6.1
         version: 8.6.1
@@ -872,15 +869,6 @@ packages:
 
   '@profullstack/emailer@1.0.1':
     resolution: {integrity: sha512-/uhHJJGH+1xSSz3mJn6X+m6aruYjMD3JOaRp/d4R/YWlzpy07H9z0/JUleIyRyBPNmaANSIwjTZ7aVjaukOEpg==}
-
-  '@profullstack/referrals@file:../referrals':
-    resolution: {directory: ../referrals, type: directory}
-    engines: {node: '>=18'}
-    peerDependencies:
-      react: '>=18'
-    peerDependenciesMeta:
-      react:
-        optional: true
 
   '@rolldown/pluginutils@1.0.0-beta.53':
     resolution: {integrity: sha512-vENRlFU4YbrwVqNDZ7fLvy+JR1CRkyr01jhSiDpE1u6py3OMzQfztQU2jxykW3ALNxO4kSlqIDeYyD0Y9RcQeQ==}
@@ -4563,10 +4551,6 @@ snapshots:
   '@profullstack/autoblog@https://codeload.github.com/profullstack/autoblog/tar.gz/75e54af77cbcf61dbd90fb3ed529c1b2dad1ed6f': {}
 
   '@profullstack/emailer@1.0.1': {}
-
-  '@profullstack/referrals@file:../referrals(react@19.2.3)':
-    optionalDependencies:
-      react: 19.2.3
 
   '@rolldown/pluginutils@1.0.0-beta.53': {}
 
