@@ -89,7 +89,7 @@ export function BountyForm({ initialData, bountyId }: BountyFormProps = {}) {
     if (!title.trim()) return setError("Title is required");
     if (!description.trim()) return setError("Description is required");
     const payoutNum = parseFloat(payout);
-    if (!payoutNum || payoutNum <= 0) return setError("Enter a valid payout amount");
+    if (!payoutNum || payoutNum < 0.01) return setError("Payout must be at least $0.01");
     if (questions.length === 0) return setError("Add at least one question");
     for (const q of questions) {
       if (!q.label.trim()) return setError("Every question needs a label");

@@ -154,7 +154,7 @@ export function ApplyForm({
                   : `Gig budget: $${budgetMin} - $${budgetMax}`
                 : "Enter your proposed rate"
             }
-            min={0}
+            min={0.01}
             step={0.01}
           />
           {paymentCoin && (

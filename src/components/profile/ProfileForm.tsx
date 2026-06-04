@@ -415,7 +415,9 @@ export function ProfileForm({ profile }: ProfileFormProps) {
           <Input
             id="hourly_rate"
             type="number"
-            placeholder="50"
+            placeholder="0.01"
+            min="0.01"
+            step="0.01"
             {...register("hourly_rate", { valueAsNumber: true })}
             disabled={isLoading}
           />
@@ -458,7 +460,8 @@ export function ProfileForm({ profile }: ProfileFormProps) {
                 id="rate_amount"
                 type="number"
                 step="0.01"
-                placeholder={rateType === "revenue_share" ? "10" : "0.05"}
+                min="0.01"
+                placeholder={rateType === "revenue_share" ? "10" : "0.01"}
                 {...register("rate_amount", { valueAsNumber: true })}
                 disabled={isLoading || !rateType}
               />

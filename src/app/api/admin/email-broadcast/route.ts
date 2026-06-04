@@ -35,22 +35,28 @@ async function checkAdmin(): Promise<
   return { ok: true };
 }
 
+async function getAllUserEmails(svc: ReturnType<typeof createServiceClient>): Promise<string[]> {
+  const emails: string[] = [];
+  let page = 1;
+  while (true) {
+    const { data, error } = await (svc as any).auth.admin.listUsers({ page, perPage: 1000 });
+    if (error || !data?.users?.length) break;
+    for (const u of data.users) {
+      if (u.email && u.email_confirmed_at) emails.push(u.email);
+    }
+    if (data.users.length < 1000) break;
+    page++;
+  }
+  return emails;
+}
+
 export async function GET(_req: NextRequest) {
   const auth = await checkAdmin();
   if (!auth.ok) return auth.response;
 
   const svc = createServiceClient();
-  const { data, error } = await (svc as any)
-    .from("profiles")
-    .select("email")
-    .not("email", "is", null);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  const count = (data ?? []).length;
-  return NextResponse.json({ count });
+  const emails = await getAllUserEmails(svc);
+  return NextResponse.json({ count: emails.length });
 }
 
 export async function POST(req: NextRequest) {
@@ -73,18 +79,7 @@ export async function POST(req: NextRequest) {
   }
 
   const svc = createServiceClient();
-  const { data, error } = await (svc as any)
-    .from("profiles")
-    .select("email")
-    .not("email", "is", null);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  const emails = (data ?? [])
-    .map((r: { email: string | null }) => r.email)
-    .filter((e: string | null): e is string => Boolean(e));
+  const emails = await getAllUserEmails(svc);
 
   if (emails.length === 0) {
     return NextResponse.json({ sent: 0, failed: 0 });

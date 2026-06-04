@@ -308,7 +308,8 @@ export function GigForm({ initialData, gigId, mode = "create" }: GigFormProps) {
               id="budget_min"
               type="number"
               placeholder={isSatsCoin ? "e.g. 50000" : "0"}
-              step={isSatsCoin ? "1" : (budgetType === "per_task" || budgetType === "per_unit") ? "0.01" : "1"}
+              step={isSatsCoin ? "1" : "0.01"}
+              min={isSatsCoin ? "1" : "0.01"}
               {...register("budget_min", { valueAsNumber: true })}
               disabled={isLoading}
             />
@@ -329,7 +330,8 @@ export function GigForm({ initialData, gigId, mode = "create" }: GigFormProps) {
               id="budget_max"
               type="number"
               placeholder={isSatsCoin ? "e.g. 100000" : "0"}
-              step={isSatsCoin ? "1" : (budgetType === "per_task" || budgetType === "per_unit") ? "0.01" : "1"}
+              step={isSatsCoin ? "1" : "0.01"}
+              min={isSatsCoin ? "1" : "0.01"}
               {...register("budget_max", { valueAsNumber: true })}
               disabled={isLoading}
             />

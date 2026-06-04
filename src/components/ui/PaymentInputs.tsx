@@ -74,8 +74,9 @@ export function AmountInput({
 }: AmountInputProps) {
   const isSats = !!coin && SATS_COINS.has(coin);
   const resolvedStep = step ?? (isSats ? "1" : fractional ? "0.01" : "1");
+  const resolvedMin = min ?? (isSats ? "1" : fractional ? "0.01" : "0");
   const resolvedPlaceholder =
-    placeholder ?? (isSats ? "e.g. 50000" : "0");
+    placeholder ?? (isSats ? "e.g. 50000" : "0.01");
   return (
     <input
       id={id}
@@ -83,7 +84,7 @@ export function AmountInput({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
-      min={min ?? "0"}
+      min={resolvedMin}
       step={resolvedStep}
       placeholder={resolvedPlaceholder}
       className={
