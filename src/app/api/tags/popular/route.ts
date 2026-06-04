@@ -1,3 +1,4 @@
+import { parsePaginationParam } from "@/lib/api-pagination";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { parsePaginationParam } from "@/lib/api-pagination";
