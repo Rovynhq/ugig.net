@@ -37,7 +37,7 @@ export function PollDisplay({ postId, isLoggedIn }: PollDisplayProps) {
   }, [postId]);
 
   const handleVote = async (optionId: string) => {
-    if (!isLoggedIn || voting) return;
+    if (!isLoggedIn || voting || optionId === userVote) return;
     setVoting(true);
 
     try {
@@ -74,20 +74,19 @@ export function PollDisplay({ postId, isLoggedIn }: PollDisplayProps) {
   const showResults = hasVoted || !isLoggedIn;
 
   return (
-    <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="mt-3 space-y-2"
+      onClick={(e) => e.stopPropagation()}
+      role={showResults && isLoggedIn ? "radiogroup" : undefined}
+      aria-label={showResults && isLoggedIn ? "Poll choices" : undefined}
+    >
       {options.map((option) => {
         const isSelected = userVote === option.id;
         const isWinner = showResults && option.votes === Math.max(...options.map((o) => o.votes)) && option.votes > 0;
 
         if (showResults) {
-          return (
-            <div
-              key={option.id}
-              className={cn(
-                "relative rounded-md border overflow-hidden transition-colors",
-                isSelected ? "border-primary" : "border-border"
-              )}
-            >
+          const result = (
+            <>
               {/* Background bar */}
               <div
                 className={cn(
@@ -106,6 +105,28 @@ export function PollDisplay({ postId, isLoggedIn }: PollDisplayProps) {
                   {option.percentage}%
                 </span>
               </div>
+            </>
+          );
+          const className = cn(
+            "relative rounded-md border overflow-hidden transition-colors",
+            isSelected ? "border-primary" : "border-border"
+          );
+
+          return isLoggedIn ? (
+            <button
+              key={option.id}
+              type="button"
+              className={cn(className, "block w-full text-left disabled:opacity-50")}
+              onClick={() => handleVote(option.id)}
+              disabled={voting}
+              role="radio"
+              aria-checked={isSelected}
+            >
+              {result}
+            </button>
+          ) : (
+            <div key={option.id} className={className}>
+              {result}
             </div>
           );
         }
