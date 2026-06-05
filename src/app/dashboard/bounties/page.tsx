@@ -257,7 +257,7 @@ export default async function DashboardBountiesPage({
                 <p className="text-xs text-muted-foreground">
                   Submitted {new Date(s.created_at).toLocaleDateString()}
                   {s.bounty && (
-                    <> · {formatBountyPayout(s.bounty.payout_usd, s.bounty.payment_coin)} payout</>
+                    <> · {formatBountyPayout(s.bounty.payout_usd, s.bounty.payment_coin)}</>
                   )}
                 </p>
               </Link>
