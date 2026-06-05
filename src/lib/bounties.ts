@@ -3,7 +3,7 @@ import { formatCurrency } from "@/lib/utils";
 
 /**
  * Human label for a bounty payout, matching the gig card style:
- * "$2.00 USD (paid in SOL)" when a coin is set, otherwise "$2.00 USD".
+ * "Pays $2.00 USD in SOL" when a coin is set, otherwise "$2.00 USD".
  * Centralized so browse/detail/dashboard stay consistent.
  */
 export function formatBountyPayout(
@@ -12,7 +12,7 @@ export function formatBountyPayout(
 ): string {
   const amount = Number(amountUsd);
   const usd = `${formatCurrency(amount)} USD`;
-  return paymentCoin ? `${usd} (paid in ${paymentCoin})` : usd;
+  return paymentCoin ? `Pays ${usd} in ${paymentCoin}` : usd;
 }
 
 export const questionSchema = z.object({
